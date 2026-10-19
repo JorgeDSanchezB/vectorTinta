@@ -1,0 +1,734 @@
+     1→     1→# VectorTinta — Plan Maestro de Producto y Arquitectura
+     2→     2→
+     3→     3→**Versión:** 1.0 · **Iteración:** 1 (SOLO PLANIFICACIÓN)
+     4→     4→**Estado:** Fases 1–5 completadas y verificadas estáticamente. Fase 6 **preparada** (estructura, firmas y comandos) pero **NO implementada**, tal y como exige el enunciado de esta iteración.
+     5→     5→**Idioma:** castellano. **Convención de fechas:** ISO-8601, zona horaria del taller (configurable).
+     6→     6→
+     7→     7→---
+     8→     8→
+     9→     9→## 0. Resumen ejecutivo
+    10→    10→
+    11→    11→**VectorTinta** es un estudio web para talleres de serigrafía y diseñadores gráficos que transforma una imagen raster (JPG/PNG/WebP) en un SVG vectorial editable y, desde ahí, permite: eliminar el fondo en el navegador, recolorear por zonas, separar en capas por color plano y preparar la exportación serigráfica (un SVG por tinta + `manifest.json` con el orden de impresión, empaquetados en ZIP).
+    12→    12→
+    13→    13→El procesamiento pesado (vectorización WASM, eliminación de fondo ONNX, empaquetado ZIP) se ejecuta **íntegramente en el cliente** dentro de Web Workers: la imagen original no viaja a ningún servidor para ser procesada. El backend se limita a persistencia, autenticación, cuotas, listados paginados y trazabilidad.
+    14→    14→
+    15→    15→**Decisión de entorno (resumida, ver ADR-000):** el enunciado plantea Vite+Fastify+PostgreSQL+MinIO. El entorno de ejecución real de esta iteración es un único servicio Next.js 16 con un solo puerto expuesto, Prisma y SQLite. La arquitectura se diseña con **puertos y adaptadores** (interfaces `StorageAdapter`, `VectorizerEngine`, `BackgroundRemovalEngine`, `Exporter`, repositorios) de modo que el paso a PostgreSQL/S3/Fastify sea sustitución de adaptador, no rediseño. Cada desviación del stack propuesto está justificada con formato *problema / coste / alternativa descartada* en `docs/decisions/`.
+    16→    16→
+    17→    17→**Índice de fases:**
+    18→    18→
+    19→    19→| Fase | Contenido | Estado |
+    20→    20→|---|---|---|
+    21→    21→| 1 | Plan estratégico | ✅ Completada |
+    22→    22→| 2 | Modelado de datos | ✅ Completada |
+    23→    23→| 3 | Contratos API | ✅ Completada |
+    24→    24→| 4 | Lógica de inserción extensible | ✅ Completada |
+    25→    25→| 5 | Renderizado dinámico y listas | ✅ Completada |
+    26→    26→| 6 | Código fuente | 🔒 Preparada (sin implementar, por acuerdo) |
+    27→    27→| — | Informe del Árbitro | Se anexa al final de la iteración con datos reales de la pasada adversarial |
+    28→    28→
+    29→    29→---
+    30→    30→
+    31→    31→## 1. 🏗️ Fase 1 — Plan Estratégico
+    32→    32→
+    33→    33→### 1.1 Objetivo y alcance
+    34→    34→
+    35→    35→**Objetivo de producto.** Que un diseñador o un taller de estampación pase de “tengo un JPG del cliente” a “tengo mis fotolistos separados por tinta” sin abrir Illustrator ni instalar nada. Nivel de ambición del listón: herramienta que un profesional pagaría 20 €/mes sin dudar.
+    36→    36→
+    37→    37→**Dentro del alcance (v1):**
+    38→    38→1. Cargar imagen raster (JPG/PNG/WebP) con validación de límites (píxeles, bytes, MIME) — límites en configuración, no en código.
+    39→    39→2. Vectorizar con **presets** (baja/media/alta) + parámetros avanzados validados por esquema (Fase 4).
+    40→    40→3. Eliminar fondo **en el navegador** (ONNX en Web Worker) con reversibilidad (undo).
+    41→    41→4. Recolorear zonas/capas sobre el lienzo con previsualización instantánea y undo/redo.
+    42→    42→5. Separar en capas por color plano; renombrar, reordenar, ocultar, aislar.
+    43→    43→6. Vista **Preparación de tintas**: por capa, color (HEX + nombre), área cubierta (px y %), marca de tinta única y orden de impresión.
+    44→    44→7. Exportación serigráfica: ZIP con un SVG por capa + `manifest.json` (orden de impresión, colores, áreas, checksums) + exportadores adicionales registrables (mockup PNG, PDF por capa en el futuro).
+    45→    45→8. Persistencia de proyecto: origen, parámetros, capas, colores y exportaciones; recuperación tras recarga.
+    46→    46→9. Listado de proyectos del usuario paginado por cursor.
+    47→    47→
+    48→    48→**Fuera del alcance (v1, documentado para no inflar):**
+    49→    49→- Colaboración multiusuario en tiempo real (el backend la habilita por diseño — `ownerId` + `AuditEvent` — pero no hay UI en v1; se declara explícitamente).
+    50→    50→- Edición de nodos Bézier manual (no es un editor vectorial generalista: es un preparador serigráfico).
+    51→    51→- Modo móvil avanzado: en móvil se advierte la degradación (banner de rendimiento) y se permiten solo consulta y exportación ligera; la edición pesada se declara experiencia de escritorio (supuesto S-03).
+    52→    52→
+    53→    53→### 1.2 Actores y casos de uso principales
+    54→    54→
+    55→    55→| Actor | Descripción | Casos de uso |
+    56→    56→|---|---|---|
+    57→    57→| **Diseñador gráfico** | Prepara arte final del cliente | UC-1 vectorizar con preset; UC-3 recolorear por zona; UC-5 exportar SVG por capa; UC-7 persistir y recuperar proyecto |
+    58→    58→| **Operario de taller** | Prepara pantallas y tintas | UC-4 separar por color; UC-6 vista de tintas con HEX, área y orden; UC-8 imprimir manifest/ZIP |
+    59→    59→| **Cuentas del plan** | Usuario autenticado con cuota | UC-9 gestionar proyectos (listado paginado, renombrar, borrar); UC-10 respetar/consultar cuota |
+    60→    60→| **Visitante evaluador** | Prueba sin registro | Modo local (todo en cliente, sin persistir); banner informativo; sin datos personales |
+    61→    61→
+    62→    62→### 1.3 Supuestos (numerados; si se rompen, se reabre el plan)
+    63→    63→
+    64→    64→- **S-01** Imágenes de entrada ≤ 4096×4096 px y ≤ 15 MiB (valores por defecto **configurables**, ver `app.config.ts`). El 95 % de artes para serigrafía cabe holgado.
+    65→    65→- **S-02** Navegadores de escritorio actuales con WASM, Web Workers y `OffscreenCanvas` (Chromium/WebKit/Firefox de los últimos 24 meses).
+    66→    66→- **S-03** La edición de calidad es experiencia de escritorio; móvil = consulta + avisos.
+    67→    67→- **S-04** Un proyecto = un arte final; máximo 30 capas por vectorización y 20 proyectos por usuario gratuito (configurables).
+    68→    68→- **S-05** Las capas se derivan de colores planos del resultado vectorial; no hay detección semántica de “objetos”.
+    69→    69→- **S-06** El cliente es fiable para los metadatos declarativos (dimensiones, checksum) y el servidor los revalida parcialmente (bytes, MIME); el sondeo de píxeles en servidor queda como endurecimiento de producción (ver 3.x).
+    70→    70→- **S-07** No se procesa PII en las imágenes; la imagen pertenece al proyecto del usuario y no se usa para nada más.
+    71→    71→
+    72→    72→### 1.4 Riesgos y mitigaciones
+    73→    73→
+    74→    74→| # | Riesgo | Prob. | Impacto | Mitigación |
+    75→    75→|---|---|---|---|---|
+    76→    76→| R-01 | **Licencias del motor WASM** (vtracer: licencia original restrictiva; ports npm con licencias dispares; potrace: GPL) | Media | Alto (bloquea producto comercial) | `VectorizerEngine` como puerto con 2 adaptadores: `vtracer-wasm` (pendiente de auditoría de licencia, marcado en el propio archivo) e `imagetracer.js` (dominio público/Unlicense, fallback seguro). Decisión bloqueante documentada; **no** se elige licencia sin verificación real. Ver ADR-001. |
+    77→    77→| R-02 | **Licencia del modelo/bg-removal** (`@imgly/background-removal` tiene condiciones de uso propias; el modelo subyacente ISNet/U²-Net pesa Apache-2.0) | Media | Alto | Puerto `BackgroundRemovalEngine`; adaptador `imgly` marcado “verificar licencia antes de producción”; alternativa documentada: port ONNX de U²-Net con `onnxruntime-web` (Apache-2.0). Ver ADR-009. |
+    78→    78→| R-03 | **Calidad perceptual del SVG** insuficiente en fotos | Media | Alto | Presets por caso de uso + métrica objetivo SSIM ≥ 0,92 con fixtures reproducibles (`docs/fixtures/`), umbral y protocolo documentados; inspección visual del árbitro en implementación. |
+    79→    79→| R-04 | Rendimiento/memoria en imágenes grandes (WASM + ONNX) | Media | Medio | Límite de píxeles configurable; Workers cancelables; presupuesto <100 ms por interacción (5.3); degradación explícita, nunca cuelgue silencioso. |
+    80→    80→| R-05 | Móvil/tableta lento con WASM | Alta | Medio | S-03: banner de degradación + bloqueo de operaciones O(píxeles) en pantallas pequeñas (configuración `limits.mobile`). |
+    81→    81→| R-06 | Abuso de cuota/almacenamiento | Media | Medio | Cuotas por configuración + rate limiting + `AuditEvent` para trazabilidad. |
+    82→    82→| R-07 | SQLite con escrituras concurrentes en sandbox | Baja | Bajo (solo demo) | ADR-005: SQLite solo para esta iteración; el esquema es dialecto-agnóstico y el salto a PostgreSQL es cambio de `provider` + migraciones. |
+    83→    83→| R-08 | Falta de entorno de ejecución del producto en esta iteración | Cierta | Medio | Honestidad epistémica: verificación estática del diseño + protocolos de verificación reproducibles por punto del listón (sección 10). Nada de resultados inventados. |
+    84→    84→
+    85→    85→### 1.5 Arquitectura general
+    86→    86→
+    87→    87→Tres niveles con puertos explícitos (diagrama completo en `docs/diagrams/arquitectura.mmd`):
+    88→    88→
+    89→    89→```
+    90→    90→┌────────────────────────────  CLIENTE  ────────────────────────────┐
+    91→    91→│  UI: Next.js 16 (App Router) · React 19 · TS · Tailwind 4 ·        │
+    92→    92→│      shadcn/ui (Radix) · Zustand (slices) · react-window            │
+    93→    93→│  Lienzo: SVG nativo interactivo (viewBox zoom/pan, hit-test DOM)   │
+    94→    94→│  Web Workers: vectorizador (WASM) · bg-removal (ONNX) · export ZIP │
+    95→    95→│  Puertos: VectorizerEngine · BackgroundRemovalEngine · Exporter ·   │
+    96→    96→│           SelectionStrategy · StorageGateway (cliente→API)         │
+    97→    97→└───────────────┬───────────────────────────────────────────────────┘
+    98→    98→                │ REST + JSON · JWT Bearer · RFC 7807 en errores
+    99→    99→┌───────────────▼────────────  API (Route Handlers)  ────────────────┐
+   100→   100→│  Validación Zod (strict) · Autenticación (jose JWT + argon2) ·      │
+   101→   101→│  Rate limiting · Paginación cursor (createdAt,id) · Cuotas ·       │
+   102→   102→│  Problemas RFC 7807 · Registries: Preset/Exporter/Operation        │
+   103→   103→└───────┬─────────────────────────────────────────┬─────────────────┘
+   104→   104→        │                                           │
+   105→   105→┌───────▼────────────────┐            ┌─────────────▼────────────────┐
+   106→   106→│  Prisma ORM            │            │  StorageAdapter (puerto)      │
+   107→   107→│  SQLite (sandbox) →    │            │  Local FS (sandbox) →          │
+   108→   108→│  PostgreSQL 16 (prod)  │            │  S3/MinIO/R2 (prod)           │
+   109→   109→└────────────────────────┘            └──────────────────────────────┘
+   110→   110→```
+   111→   111→
+   112→   112→**Capas de dominio / aplicación / infraestructura (versión simplificada y declarada):** el tamaño del producto justifica hexagonal *light*: `src/lib/domain` (entidades + invariantes + errores de dominio), `src/lib/services` (casos de uso: crear proyecto, persistir vectorización, encolar exportación…), `src/lib/adapters` (implementaciones: Prisma, storage local/S3, motores). No se introduce un bus de eventos ni un contenedor DI: coste > beneficio (alternativa descartada: hexagonal completo con use-cases aislados y DI; se documenta en ADR-008).
+   113→   113→
+   114→   114→### 1.6 Estructura de componentes (Átomos → Moléculas → Organismos → Página)
+   115→   115→
+   116→   116→- **Átomos:** `Button`, `Badge`, `Tooltip`, `Slider`, `Switch`, `Skeleton`, `ColorSwatch` (muestra HEX accesible con nombre), `StateChip` (estado de validación).
+   117→   117→- **Moléculas:** `PresetSelector` (generado desde el esquema del preset, ver 4.4), `ColorField` (HEX + paleta serigráfica de configuración), `LayerRow` (memoizada; clave `layer.id`), `QuotaMeter`, `DiagnosticsToast`, `CommandButton`.
+   118→   118→- **Organismos:** `AssetPanel` (carga + validación), `LayerPanel` (árbol virtualizado), `VectorStage` (lienzo SVG interactivo), `InkPrepView` (preparación de tintas), `InspectorPanel` (propiedades, exportación), `ProjectsDrawer` (listado paginado por cursor), `DiagnosticsPanel` (taxonomía de fallos), `ExportDialog`.
+   119→   119→- **Página:** una única ruta visible `/` (restricción del entorno); el espacio de trabajo conmuta vistas internas por estado (carga → editar → tintas → exportar). En producción con enrutado completo serían `/`, `/proyectos`, `/proyectos/[id]`; se documenta la equivalencia.
+   120→   120→
+   121→   121→### 1.7 Gestión de estado (Zustand + slices) — justificación
+   122→   122→
+   123→   123→- **Zustand** frente a Redux Toolkit: el estado es mediano y de alta frecuencia de actualización local (selección, zoom, colores). Zustand con selectores evita re-renders globales sin ceremonia de actions/reducers/dispatch. *Coste:* disciplina de selectores. *Alternativa descartada:* Redux (más boilerplate, indirección extra no justificada); TanStack Query se usa para el **estado de servidor** (proyectos, exports) y Zustand para el **estado de sesión de trabajo** (ADR-004).
+   124→   124→- **Slices:**
+   125→   125→  - `projectSlice`: proyecto activo, assets, vectorización, capas (espejo de servidor + cambios pendientes).
+   126→   126→  - `toolSlice`: herramienta activa, zoom/pan, selección, capas aisladas.
+   127→   127→  - `historySlice`: pila undo/redo de comandos (patrón Command), límite configurable (100).
+   128→   128→  - `exportSlice`: estado de exportaciones en curso (worker), progreso, resultados.
+   129→   129→  - `diagnosticsSlice`: registro clasificado de fallos (seis clases, ver 8).
+   130→   130→  - `authSlice`: sesión, tokens, cuota restante.
+   131→   131→- **Undo/redo:** comandos puros (`RecolorLayersCommand`, `RemoveBackgroundCommand`, `ToggleVisibilityCommand`, `RenameLayerCommand`, `ReorderLayerCommand`) con `apply/undo`, serializables y acotados por `limits.layers.historyStackSize`.
+   132→   132→
+   133→   133→### 1.8 Decisiones técnicas (resumen; detalle en ADRs)
+   134→   134→
+   135→   135→| # | Decisión | Problema que resuelve | Coste | Alternativa descartada | ADR |
+   136→   136→|---|---|---|---|---|---|
+   137→   137→| D-01 | Vectorización WASM **en cliente** | Coste/latencia de servidor + privacidad | Bundle ≈1–2 MiB; memoria del tab; complejidad de Workers | Vectorizar en servidor (coste por conversión, subida obligatoria de la imagen) | ADR-001 |
+   138→   138→| D-02 | **SVG nativo interactivo** para el lienzo | Los datos ya son paths SVG: hit-test y recolor nativos, export = serializar | Rendimiento DOM con >>10⁴ nodos (mitigado por capas/visibilidad) | Konva/Fabric (convierte paths a escena canvas, doble estado, export requiere re-serializar) | ADR-002 |
+   139→   139→| D-03 | **Workers** (1 por tipo de tarea, cancelables) | No congelar el hilo principal; O(píxeles) en background | Complejidad de mensajes/transferables | Todo en hilo principal (jank) o pool genérico (sobreingeniería) | ADR-003 |
+   140→   140→| D-04 | **Zustand slices** | Estado local de alta frecuencia sin re-renders globales | Disciplina de selectores | Redux Toolkit | ADR-004 |
+   141→   141→| D-05 | **Prisma + SQLite (sandbox) → PostgreSQL (prod)** | Persistencia relacional con migraciones | Sin enums nativos en SQLite → validación Zod en el borde | Mongoose/NoSQL (no hay razón: los datos son relacionales) | ADR-005 |
+   142→   142→| D-06 | **StorageAdapter** local→S3 | Almacenamiento de objetos portable | Una indirección | Disco local acoplado (insalvable en prod) | ADR-006 |
+   143→   143→| D-07 | **JWT acceso+refresco con jose + argon2** | Contrato del enunciado (access+refresh, argon2) | Rotación/revocación requiere tabla `RefreshToken` | NextAuth v4 (flujo de refresh con Credentials no es de primera clase) | ADR-007 |
+   144→   144→| D-08 | **Registros con esquemas** (Preset/Exporter/Operation/Selection) | Extensión sin tocar núcleo (regla del carro) | Coste de indirección acotado y documentado | `switch` central (viola la regla del carro) | ADR-008 |
+   145→   145→| D-09 | **Bg-removal ONNX en cliente** | Privacidad + coste cero de servidor | Descarga de modelo (10–40 MiB) gestionada con aviso | API externa de pago (rompe “sin subir la imagen”) | ADR-009 |
+   146→   146→| D-10 | **Cursor compuesto (createdAt,id)** | Paginación estable con orden temporal | Codificación base64url + OR en query | OFFSET (salta filas con escrituras concurrentes) | ADR-010 |
+   147→   147→| D-11 | **Next.js 16 unificado** (route handlers como API) | Restricción real del entorno (1 puerto) | Sin escalado independiente del API en esta iteración | Separar Fastify ahora (no aporta en sandbox; plan de extracción documentado) | ADR-000 |
+   148→   148→
+   149→   149→### 1.9 Mapa de módulos (equivalencia con el monorepo propuesto)
+   150→   150→
+   151→   151→El enunciado propone `packages/vectorizer`, `packages/bg-removal`, `packages/exporter`, `apps/web`, `apps/api`. En un único repo Next.js, los “paquetes” son módulos con límite de importación declarado:
+   152→   152→
+   153→   153→| Paquete propuesto | Módulo real (Fase 6) | Exporta (puertos) |
+   154→   154→|---|---|---|
+   155→   155→| `packages/vectorizer` | `src/lib/vectorizer/` + `src/workers/vectorizer.worker.ts` | `VectorizerEngine`, `VectorParams`, `parseSvgResult` |
+   156→   156→| `packages/bg-removal` | `src/lib/bg-removal/` + `src/workers/bg-removal.worker.ts` | `BackgroundRemovalEngine`, `AlphaMaskResult` |
+   157→   157→| `packages/exporter` | `src/lib/exporter/` + `src/workers/export.worker.ts` | `Exporter`, `ExporterRegistry`, manifest types |
+   158→   158→| `apps/web` | `src/app/` + `src/components/` | UI |
+   159→   159→| `apps/api` | `src/app/api/**/route.ts` + `src/lib/http/` | contratos REST (Fase 3) |
+   160→   160→
+   161→   161→### 1.10 Complejidad declarada de las operaciones pesadas
+   162→   162→
+   163→   163→| Operación | Complejidad | Memoria típica | Estrategia | Límite práctico (config) |
+   164→   164→|---|---|---|---|---|
+   165→   165→| Vectorización | O(W·H) muestreo + O(paths) trazado | 2–4× tamaño raster | Worker propio, streaming de progreso, cancelable | `maxPixels` 4096² |
+   166→   166→| Eliminación de fondo | O(W·H·modelo) (ONNX) | modelo (10–40 MiB) + buffers | Worker propio, carga de modelo perezosa con consentimiento visible | `maxPixels` + aviso de descarga |
+   167→   167→| Separación en capas | O(paths) agrupación por color exacto | O(paths) | En cliente, sobre el parse del SVG | `maxLayers` 30 (merge forzoso por cercanía, configurable) |
+   168→   168→| Exportación ZIP | O(bytes SVG por capa) | O(total bytes) | Worker propio (fflate) | `maxLayers` |
+   169→   169→| Listados servidor | O(log n + limit) por índice compuesto | O(limit) | Cursor `createdAt,id`, `SELECT` explícito | `pagination.maxLimit` 100 |
+   170→   170→| Render del árbol de capas | O(visible) con virtualización | O(umbral) | react-window > `virtualizationThreshold` (50) | — |
+   171→   171→
+   172→   172→---
+   173→   173→
+   174→   174→## 2. 🧬 Fase 2 — Modelado de Datos
+   175→   175→
+   176→   176→### 2.1 Convenciones
+   177→   177→
+   178→   178→- Toda entidad: `id` (UUID) + `createdAt`; mutables añaden `updatedAt`.
+   179→   179→- Primitivos de esquema sin listas embebidas; los atributos dinámicos van en columnas `Json` validadas por Zod en el borde (Fase 4).
+   180→   180→- SQLite no tiene enums nativos: los campos “enum” son `String` validados por Zod en la capa HTTP (ADR-005).
+   181→   181→- Borrado en cascada desde `Project` (política `Cascade`): un proyecto y sus datos son una unidad de privacidad.
+   182→   182→
+   183→   183→### 2.2 Entidades principales
+   184→   184→
+   185→   185→| Entidad | Campos clave | Invariantes / validaciones |
+   186→   186→|---|---|---|
+   187→   187→| `User` | `id`, `email` (único), `name?`, `passwordHash` (argon2id), `plan` ('free'\|'pro'), `createdAt`, `updatedAt` | email RFC; password ≥ `auth.passwordMinLength` (10); nunca se devuelve `passwordHash` (SELECT explícito) |
+   188→   188→| `RefreshToken` | `id`, `userId`, `tokenHash` (sha-256), `expiresAt`, `revokedAt?`, `createdAt` | rotación en cada uso; un token vale exactamente 1 vez; revocación en logout/robo |
+   189→   189→| `Project` | `id`, `ownerId→User`, `name`, `description?` (nullable), `thumbnailKey?`, `createdAt`, `updatedAt` | `name` 1..`projects.nameMaxLength` (80); contaje por usuario ≤ `projects.maxPerUserFree` (cuota → 409 problema) |
+   190→   190→| `Asset` | `id`, `projectId→Project`, `role` ('source'\|'result'\|'thumbnail'), `mimeType`, `width`, `height`, `bytes`, `storageKey`, `checksum` (sha-256), `createdAt` | MIME ∈ `limits.image.allowedMimeTypes`; `bytes>0 ≤ maxUploadBytes`; `1 ≤ width,height ≤ maxDimension`; `checksum` hex 64 |
+   191→   191→| `Vectorization` | `id`, `assetId→Asset`, `engineId`, `presetId`, `params` (Json), `paramsSchemaVersion`, `svgStorageKey`, `nodeCount`, `createdAt` | `presetId` ∈ PresetRegistry; `params` valida contra el esquema del preset; `nodeCount>0` |
+   192→   192→| `Layer` | `id`, `vectorizationId→Vectorization`, `orden`, `colorHex`, `name`, `svgFragmentKey`, `areaPx`, `visible`, `createdAt` | `colorHex` matchea `^#[0-9A-Fa-f]{6}$`; `orden` único por vectorización (0..maxLayers-1); `areaPx ≥ 0` |
+   193→   193→| `Export` | `id`, `projectId→Project`, `formatId`, `storageKey`, `manifest` (Json), `manifestSchemaVersion`, `createdAt` | `formatId` ∈ ExporterRegistry; `manifest` valida contra el esquema del formato |
+   194→   194→| `AuditEvent` | `id`, `userId?`, `projectId?`, `action` (string tipado), `metadata` (Json), `createdAt` | solo añadir; sin PII en `metadata` (guard de Fase 4); retención configurable |
+   195→   195→
+   196→   196→### 2.3 Esquema Prisma (referencia de Fase 6; dialecto SQLite, equivalente en PostgreSQL)
+   197→   197→
+   198→   198→```prisma
+   199→   199→// prisma/schema.prisma — Fase 6 (preparada, no aplicada en esta iteración)
+   200→   200→generator client { provider = "prisma-client-js" }
+   201→   201→datasource db { provider = "sqlite" url = env("DATABASE_URL") } // prod: provider = "postgresql"
+   202→   202→
+   203→   203→model User {
+   204→   204→  id           String   @id @default(uuid())
+   205→   205→  email        String   @unique
+   206→   206→  name         String?
+   207→   207→  passwordHash String
+   208→   208→  plan         String   @default("free") // Zod enum en el borde: 'free' | 'pro'
+   209→   209→  createdAt    DateTime @default(now())
+   210→   210→  updatedAt    DateTime @updatedAt
+   211→   211→  projects      Project[]
+   212→   212→  refreshTokens RefreshToken[]
+   213→   213→  auditEvents   AuditEvent[]
+   214→   214→}
+   215→   215→
+   216→   216→model RefreshToken {
+   217→   217→  id        String    @id @default(uuid())
+   218→   218→  userId    String
+   219→   219→  tokenHash String    @unique
+   220→   220→  expiresAt DateTime
+   221→   221→  revokedAt DateTime?
+   222→   222→  createdAt DateTime  @default(now())
+   223→   223→  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+   224→   224→  @@index([userId, expiresAt])
+   225→   225→}
+   226→   226→
+   227→   227→model Project {
+   228→   228→  id           String   @id @default(uuid())
+   229→   229→  ownerId      String
+   230→   230→  name         String
+   231→   231→  description  String?
+   232→   232→  thumbnailKey String?
+   233→   233→  createdAt    DateTime @default(now())
+   234→   234→  updatedAt    DateTime @updatedAt
+   235→   235→  owner        User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+   236→   236→  assets       Asset[]
+   237→   237→  exports      Export[]
+   238→   238→  auditEvents  AuditEvent[]
+   239→   239→  @@index([ownerId, createdAt, id]) // índice del cursor de listado
+   240→   240→}
+   241→   241→
+   242→   242→model Asset {
+   243→   243→  id         String   @id @default(uuid())
+   244→   244→  projectId  String
+   245→   245→  role       String   // Zod: 'source' | 'result' | 'thumbnail'
+   246→   246→  mimeType   String
+   247→   247→  width      Int
+   248→   248→  height     Int
+   249→   249→  bytes      Int
+   250→   250→  storageKey String   @unique
+   251→   251→  checksum   String
+   252→   252→  createdAt  DateTime @default(now())
+   253→   253→  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+   254→   254→  vectorizations Vectorization[]
+   255→   255→  @@index([projectId, createdAt, id])
+   256→   256→}
+   257→   257→
+   258→   258→model Vectorization {
+   259→   259→  id                  String   @id @default(uuid())
+   260→   260→  assetId             String
+   261→   261→  engineId            String   // p. ej. 'vtracer-wasm' | 'imagetracer'
+   262→   262→  presetId            String   // p. ej. 'baja' | 'media' | 'alta' | 'comic' (futuro)
+   263→   263→  params              Json     // validado contra PresetRegistry.get(presetId).schema
+   264→   264→  paramsSchemaVersion Int
+   265→   265→  svgStorageKey       String
+   266→   266→  nodeCount           Int
+   267→   267→  createdAt           DateTime @default(now())
+   268→   268→  asset               Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+   269→   269→  layers              Layer[]
+   270→   270→  @@index([assetId, createdAt, id])
+   271→   271→}
+   272→   272→
+   273→   273→model Layer {
+   274→   274→  id              String       @id @default(uuid())
+   275→   275→  vectorizationId String
+   276→   276→  orden           Int
+   277→   277→  colorHex        String
+   278→   278→  name            String
+   279→   279→  svgFragmentKey  String
+   280→   280→  areaPx          Int
+   281→   281→  visible         Boolean      @default(true)
+   282→   282→  createdAt       DateTime     @default(now())
+   283→   283→  vectorization   Vectorization @relation(fields: [vectorizationId], references: [id], onDelete: Cascade)
+   284→   284→  @@unique([vectorizationId, orden]) // invariante: orden único por vectorización
+   285→   285→  @@index([vectorizationId])
+   286→   286→}
+   287→   287→
+   288→   288→model Export {
+   289→   289→  id                    String   @id @default(uuid())
+   290→   290→  projectId             String
+   291→   291→  formatId              String   // ExporterRegistry: 'zip-serigrafia' | 'png-mockup' | 'pdf-capas' (futuro)
+   292→   292→  storageKey            String
+   293→   293→  manifest              Json     // validado contra ExporterRegistry.get(formatId).manifestSchema
+   294→   294→  manifestSchemaVersion Int
+   295→   295→  createdAt             DateTime @default(now())
+   296→   296→  project               Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+   297→   297→  @@index([projectId, createdAt, id]) // índice del cursor de exportaciones
+   298→   298→}
+   299→   299→
+   300→   300→model AuditEvent {
+   301→   301→  id        String   @id @default(uuid())
+   302→   302→  userId    String?
+   303→   303→  projectId String?
+   304→   304→  action    String   // tipado por unión literal de Zod en el borde
+   305→   305→  metadata  Json
+   306→   306→  createdAt DateTime @default(now())
+   307→   307→  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+   308→   308→  project    Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+   309→   309→  @@index([userId, createdAt, id])
+   310→   310→  @@index([projectId, createdAt, id])
+   311→   311→}
+   312→   312→```
+   313→   313→
+   314→   314→### 2.4 Atributos dinámicos (Json) y versionado
+   315→   315→
+   316→   316→- `Vectorization.params`, `Export.manifest`, `AuditEvent.metadata` son columnas `Json` **encapsuladas**: solo se escriben tras `safeParse` contra el esquema del registro correspondiente (Fase 4) y se revalidan al leer con **migradores por versión** (`MigrationRegistry`: `v→v+1` encadenables). Nunca se confía en el JSON almacenado.
+   317→   317→- Restricciones transversales (config): tamaño máximo de payload JSON (`limits.json.maxBytes`), profundidad máxima (`maxDepth`), claves peligrosas bloqueadas (`__proto__`, `constructor`, `prototype`) y guard anti-PII (patrones email/teléfono → rechazo con problema `invalid-params`).
+   318→   318→
+   319→   319→### 2.5 Índices, restricciones y migraciones
+   320→   320→
+   321→   321→- Índices compuestos `(owner|project|userId, createdAt, id)` exactamente donde pagina el cursor (ADR-010).
+   322→   322→- Únicos: `User.email`, `Asset.storageKey`, `RefreshToken.tokenHash`, `@@unique([vectorizationId, orden])`.
+   323→   323→- Estrategia: en sandbox `prisma db push` (schema-first sin datos que preservar); en producción `prisma migrate dev` en desarrollo y `prisma migrate deploy` en CI/CD, con revisión de drift. El esquema es idéntico en ambos dialectos salvo `provider` (ADR-005).
+   324→   324→
+   325→   325→---
+   326→   326→
+   327→   327→## 3. 📡 Fase 3 — Contratos API
+   328→   328→
+   329→   329→### 3.1 Reglas transversales
+   330→   330→
+   331→   331→- **Base:** `/api/**`. JSON salvo multipart.
+   332→   332→- **Autenticación:** `Authorization: Bearer <accessToken>` (JWT, TTL 15 min). Refresco: `POST /api/auth/refresh` con cookie `httpOnly; SameSite=Lax` o body; rotación obligatoria (ADR-007).
+   333→   333→- **Autorización:** todo recurso bajo `/api/projects/:id/**` verifica `project.ownerId === token.sub`. Recursos ajenos devuelven **404** (no 403) para no filtrar existencia; el 403 queda reservado a acciones con rol insuficiente sobre recursos propios (p. ej., exportar con cuota agotada devuelve 409, no 403). Taxonomía completa en 8 y `failure-modes.md`.
+   334→   334→- **Paginación:** TODOS los listados aceptan `?limit=` y `?cursor=`. Cursor = `base64url(createdAtISO + "|" + id)`; orden `createdAt DESC, id DESC`. `limit` por defecto 20, máximo 100 (config). `nextCursor: null` = fin.
+   335→   335→- **Validación:** Zod `.strict()` en body/query; desconocidos → 400 con detalle por campo. Multipart con tope de tamaño comprobado en `Content-Length` ANTES de leer el cuerpo (413 si excede).
+   336→   336→- **Errores:** RFC 7807 en TODOS los errores 4xx/5xx:
+   337→   337→
+   338→   338→```json
+   339→   339→{
+   340→   340→  "type": "https://vectortinta.example/problems/cuota-proyectos",
+   341→   341→  "title": "Cuota de proyectos excedida",
+   342→   342→  "status": 409,
+   343→   343→  "detail": "El plan free permite 20 proyectos. Borra uno o pasa a pro.",
+   344→   344→  "instance": "/api/projects",
+   345→   345→  "errors": [{ "field": "name", "code": "quota_exceeded", "limit": 20 }]
+   346→   346→}
+   347→   347→```
+   348→   348→
+   349→   349→- **Rate limiting:** ventana deslizante en memoria (prod: Redis — sustitución de adaptador). Por configuración: general 100 req/min/IP, auth 10 req/min/IP, mutaciones 30 req/min/usuario. 429 con cabecera `Retry-After` y problema RFC 7807.
+   350→   350→- **SELECT explícito:** ninguna consulta usa `findMany` sin `select` de columnas concretas (regla de listón).
+   351→   351→
+   352→   352→### 3.2 Catálogo de endpoints
+   353→   353→
+   354→   354→| Método | Ruta | Auth | Rate limit | Paginación | Errores típicos |
+   355→   355→|---|---|---|---|---|---|
+   356→   356→| POST | `/api/auth/register` | — | auth | — | 400 validación, 409 email existente |
+   357→   357→| POST | `/api/auth/login` | — | auth | — | 401 credenciales |
+   358→   358→| POST | `/api/auth/refresh` | cookie/body | auth | — | 401 token revocado/expirado |
+   359→   359→| POST | `/api/projects` | Bearer | mutaciones | — | 400, 409 cuota |
+   360→   360→| GET | `/api/projects?limit=&cursor=` | Bearer | general | ✅ cursor | 400 límites |
+   361→   361→| GET | `/api/projects/:id` | Bearer | general | — | 401, 404 |
+   362→   362→| PATCH | `/api/projects/:id` | Bearer | mutaciones | — | 400, 404 |
+   363→   363→| DELETE | `/api/projects/:id` | Bearer | mutaciones | — | 404 |
+   364→   364→| POST | `/api/projects/:id/assets` | Bearer | mutaciones | — | 413 tamaño, 400 MIME/dimensiones, 409 cuota de assets |
+   365→   365→| GET | `/api/projects/:id/assets?limit=&cursor=` | Bearer | general | ✅ cursor | 404 |
+   366→   366→| POST | `/api/projects/:id/vectorize` | Bearer | mutaciones | — | 400 preset/params inválidos, 409 capas > máximo |
+   367→   367→| POST | `/api/projects/:id/layers` | Bearer | mutaciones | — | 400, 409 maxLayers |
+   368→   368→| PATCH | `/api/projects/:id/layers/:layerId` | Bearer | mutaciones | — | 400 colorHex/orden inválido, 404 |
+   369→   369→| GET | `/api/projects/:id/layers?limit=&cursor=` | Bearer | general | ✅ cursor | 404 |
+   370→   370→| POST | `/api/projects/:id/exports` | Bearer | mutaciones | — | 400 formato, 409 cuota diaria |
+   371→   371→| GET | `/api/projects/:id/exports?limit=&cursor=` | Bearer | general | ✅ cursor | 404 |
+   372→   372→| GET | `/api/assets/:key` | Bearer | general | — | 404, 401 (streaming con autorización) |
+   373→   373→| GET | `/api/health` | — | — | — | — |
+   374→   374→| GET | `/api/metrics` | — (prod: interno) | — | — | — |
+   375→   375→
+   376→   376→### 3.3 Contratos detallados (ejemplos canónicos)
+   377→   377→
+   378→   378→#### POST /api/auth/register
+   379→   379→
+   380→   380→```json
+   381→   381→// Request
+   382→   382→{ "email": "taller@serigrafia.es", "password": "tinta-solida-2024", "name": "Trellat" }
+   383→   383→// 201
+   384→   384→{ "user": { "id": "…", "email": "taller@serigrafia.es", "name": "Trellat", "plan": "free", "createdAt": "…" },
+   385→   385→  "accessToken": "eyJ…", "tokenType": "Bearer", "expiresIn": 900,
+   386→   386→  "refreshToken": "httpOnly-cookie; Path=/api/auth; SameSite=Lax" }
+   387→   387→// 400 (RFC 7807) — password corta
+   388→   388→{ "type": "…/problems/validacion", "title": "Cuerpo inválido", "status": 400,
+   389→   389→  "errors": [{ "field": "password", "code": "too_small", "minLength": 10 }] }
+   390→   390→```
+   391→   391→
+   392→   392→#### GET /api/projects?limit=2&cursor=…
+   393→   393→
+   394→   394→```json
+   395→   395→// 200
+   396→   396→{ "items": [
+   397→   397→    { "id": "p-2", "name": "Camiseta festival", "description": null,
+   398→   398→      "thumbnailUrl": "/api/assets/thumb-2", "layerCount": 7,
+   399→   399→      "createdAt": "2025-06-01T10:00:00Z", "updatedAt": "2025-06-01T10:12:00Z" },
+   400→   400→    { "id": "p-1", "name": "Tote bag dibujos", "description": "Arte del cliente",
+   401→   401→      "thumbnailUrl": "/api/assets/thumb-1", "layerCount": 4,
+   402→   402→      "createdAt": "2025-05-30T09:00:00Z", "updatedAt": "2025-05-30T09:30:00Z" }
+   403→   403→  ],
+   404→   404→  "nextCursor": "MjAyNS0wNS0zMFQwOTowMDowMFofcC0x", "hasMore": true }
+   405→   405→```
+   406→   406→
+   407→   407→#### POST /api/projects/:id/vectorize (decisión: SÍNCRONA — justificación)
+   408→   408→
+   409→   409→El cálculo pesado ocurre **en el cliente** (Worker WASM); este endpoint **persiste el resultado** (SVG ya generado) y crea `Vectorization` + `Layer[]` en una transacción. No se justifica cola de jobs en v1 (anti-sobreingeniería: no hay ejecución pesada en servidor). Si en el futuro se registra un motor de servidor, el endpoint se extiende con `?async=true` + job polling; el contrato ya reserva el campo `job` para ello (documentado, no inventado ahora).
+   410→   410→
+   411→   411→```json
+   412→   412→// Request
+   413→   413→{ "presetId": "media",
+   414→   414→  "params": { "colorPrecision": 4, "filterSpeckle": 4, "cornerThreshold": 60,
+   415→   415→              "lengthThreshold": 4, "mode": "spline", "maxColors": 16 },
+   416→   416→  "engineId": "vtracer-wasm",
+   417→   417→  "sourceAssetId": "a-1",
+   418→   418→  "svg": "<svg …>…</svg>",
+   419→   419→  "layers": [
+   420→   420→    { "orden": 0, "colorHex": "#F2EFE6", "name": "Blanco opaco", "areaPx": 182044 },
+   421→   421→    { "orden": 1, "colorHex": "#1B1B1B", "name": "Negro intenso", "areaPx": 93122 }
+   422→   422→  ] }
+   423→   423→// 201
+   424→   424→{ "vectorization": { "id": "v-9", "presetId": "media", "nodeCount": 412, "createdAt": "…" },
+   425→   425→  "layers": [{ "id": "l-1", "orden": 0, "colorHex": "#F2EFE6", "name": "Blanco opaco",
+   426→   426→               "svgFragmentUrl": "/api/assets/frag-1", "areaPx": 182044, "visible": true }] }
+   427→   427→// 400 — params de otro preset:
+   428→   428→{ "type": "…/problems/params-invalidos", "status": 400,
+   429→   429→  "title": "Parámetros no válidos para el preset",
+   430→   430→  "errors": [{ "field": "params.strokeWidth", "code": "unrecognized_key",
+   431→   431→               "hint": "El campo pertenece al preset 'comic'" }],
+   432→   432→  "supportedPresets": ["baja", "media", "alta"] }
+   433→   433→```
+   434→   434→
+   435→   435→#### POST /api/projects/:id/assets (multipart)
+   436→   436→
+   437→   437→- Cabeceras: `Content-Type: multipart/form-data`; campos: `file` (binario), `role`, `width`, `height`, `checksum` (metadatos declarados por el cliente; S-06).
+   438→   438→- Guardas: `Content-Length > limits.image.maxUploadBytes` → 413 sin leer el cuerpo; revalidación de bytes tras `formData()`; MIME ∈ allowlist; dimensiones ≤ máx.; proyecto propio (o 404); cuota de assets por proyecto (`projects.maxAssetsPerProject`, 12) → 409.
+   439→   439→
+   440→   440→#### POST /api/projects/:id/exports
+   441→   441→
+   442→   442→El ZIP se ensambla en el Worker del cliente (fflate); se sube por `StorageGateway` y se registra:
+   443→   443→
+   444→   444→```json
+   445→   445→// Request
+   446→   446→{ "formatId": "zip-serigrafia",
+   447→   447→  "storageKey": "exports/e-1.zip", "checksum": "…",
+   448→   448→  "manifest": {
+   449→   449→    "schemaVersion": 1, "projectId": "p-1",
+   450→   450→    "printOrder": [
+   451→   451→      { "layerId": "l-1", "order": 0, "fileName": "capa-01-#F2EFE6-l1.svg",
+   452→   452→        "colorHex": "#F2EFE6", "colorName": "Blanco opaco", "inkMark": "TINTA-01-#F2EFE6",
+   453→   453→        "areaPx": 182044, "coveragePercent": 45.51, "visible": true }
+   454→   454→    ],
+   455→   455→    "strategy": "by-area-desc",
+   456→   456→    "source": { "presetId": "media", "engineId": "vtracer-wasm", "assetId": "a-1" }
+   457→   457→  } }
+   458→   458→// 201 → { "export": { "id": "e-1", "downloadUrl": "/api/assets/exports/e-1", "createdAt": "…" } }
+   459→   459→```
+   460→   460→
+   461→   461→#### GET /api/health y GET /api/metrics
+   462→   462→
+   463→   463→`health` → `{ "status": "ok", "db": "up", "configDigest": "sha256:…", "version": "1.0.0" }`.
+   464→   464→`metrics` → contadores en memoria (requests por código, vectorizaciones persistidas, exportaciones por formato) + uptime. En producción el recolector se sustituye por un adaptador Prometheus (documentado; no se afirma implementación).
+   465→   465→
+   466→   466→---
+   467→   467→
+   468→   468→## 4. 🧠 Fase 4 — Lógica de Inserción Extensible
+   469→   469→
+   470→   470→### 4.1 Principio
+   471→   471→
+   472→   472→Toda configuración de negocio entra como **datos validados contra esquemas registrados**, nunca como código nuevo en el núcleo. Tres registros (ADR-008): `PresetRegistry` (presets de vectorización), `ExporterRegistry` (formatos de exportación + esquema de su manifest) y `OperationRegistry` (operaciones de imagen: bg-removal, esqueletonizado futuro…). Los tres comparten el contrato:
+   473→   473→
+   474→   474→```ts
+   475→   475→interface RegistryEntry<TId extends string, TSchema extends z.ZodType> {
+   476→   476→  id: TId; label: string; description: string;
+   477→   477→  schemaVersion: number; schema: TSchema; // zod .strict()
+   478→   478→  metadata?: Record<string, string>;      // p. ej. "licencia": "pendiente-auditoria"
+   479→   479→}
+   480→   480→```
+   481→   481→
+   482→   482→### 4.2 Flujo de validación de un JSON genérico (p. ej. `params`)
+   483→   483→
+   484→   484→1. **Tamaño:** bytes > `limits.json.maxBytes` (8 KiB) → 400 `payload-too-large` (antes de parsear).
+   485→   485→2. **Profundidad:** `maxDepth` (4) comprobada con un walker determinista → 400 `json-too-deep`.
+   486→   486→3. **Claves peligrosas:** `__proto__`, `prototype`, `constructor` → 400 `unsafe-key` (defensa en profundidad; se **rechazan**, no se ignoran, para no ocultar errores).
+   487→   487→4. **Guard anti-PII:** patrones de email/teléfono en valores de primer nivel → 400 con sugerencia (`hint: "los params no admiten datos personales"`).
+   488→   488→5. **Resolución de esquema:** `PresetRegistry.get(presetId)`; preset inexistente → 400 con `supportedPresets` (recurso enumerable, no error opaco).
+   489→   489→6. **safeParse estricto:** campos desconocidos → `unrecognized_key` por campo; tipos incorrectos → `invalid_type`; rangos con límites del preset (p. ej. `colorPrecision` 1..8).
+   490→   490→7. **Versionado:** se almacena `{ values, schemaVersion }`; al leer, si `schemaVersion < actual` se aplican migradores registrados encadenados (`MigrationRegistry`), luego revalidación. Un JSON corrupto tras migrar → error `CONFIG` clasificado, se aísla el proyecto y se avisa (nunca se “arregla” silenciosamente).
+   491→   491→
+   492→   492→### 4.3 Tratamiento diferenciado (regla 4 del listón)
+   493→   493→
+   494→   494→| Situación | Tratamiento | Ejemplo concreto |
+   495→   495→|---|---|---|
+   496→   496→| Campo opcional ausente | Se aplica el default **del esquema del preset** | `params.filterSpeckle` ausente en `baja` → default 8 |
+   497→   497→| Valor `null` explícito en campo nullable | Se conserva como `null` y la UI lo muestra como “sin valor” con chip informativo; **no** se convierte en default | `project.description: null` → se pinta “—” |
+   498→   498→| `null` en campo NO nullable | 400 `invalid_type` (no se oculta) | `layers[0].colorHex: null` → rechazado |
+   499→   499→| Dato inválido | 400 con detalle por campo + acción sugerida | `colorHex: "#12"` → `errors:[{field:"colorHex",code:"invalid_pattern"}]` |
+   500→   500→| Desconocido del sistema (preset/formato/engine) | 400 enumerable con lista soportada | `presetId:"comic"` sin registrar → `supportedPresets` |
+   501→   501→| Error temporal | Reintento con backoff en cliente; 503 con `Retry-After` | fallo de red al subir ZIP → toast “Reintentar” |
+   502→   502→| Error de configuración | Clase `CONFIG` con instrucción visible | falta `NEXT_PUBLIC_BG_REMOVAL_MODEL_URL` → banner con el nombre exacto de la variable |
+   503→   503→| Fallo crítico | Modo diagnóstico + export del estado + recuperación a último punto persistido | OOM del Worker → modal, botón “Recuperar espacio de trabajo” |
+   504→   504→
+   505→   505→### 4.4 Extensión real: preset “cómic” (solo configuración)
+   506→   506→
+   507→   507→Hoy: `baja`, `media`, `alta` (semillas en `app.config.ts`, esquemas en `src/lib/registries/presets/`). Añadir “cómic”:
+   508→   508→
+   509→   509→1. Crear `src/lib/registries/presets/comic.ts` con `schemaVersion: 1` y `schema` que AÑADE `strokeWidth: z.number().min(0).max(20)` a los campos comunes.
+   510→   510→2. Añadir `"comic"` al array `vectorization.presetManifest` en `app.config.ts`.
+   511→   511→3. Nada más. `PresetRegistry` construye el mapa desde el manifiesto; el **formulario del inspector se genera desde el esquema** (metadatos de campo: label, min, max, step, unidad), por lo que la UI del preset nuevo sale gratis; el validador central (`http/validate.ts`) valida “contra el esquema del preset dado”, no contra una lista fija.
+   512→   512→
+   513→   513→**Coste del patrón:** indirección Registro (un `Map` de entradas) y disciplina de `schemaVersion`. **Alternativa descartada:** `switch(presetId)` en el validador (cada preset nuevo tocaría el núcleo: viola la regla del carro). Igual para `ExporterRegistry` (añadir `pdf-capas` = registrar entrada con `manifestSchema` propio) e `OperationRegistry`.
+   514→   514→
+   515→   515→---
+   516→   516→
+   517→   517→## 5. 🖥️ Fase 5 — Estrategia de Renderizado y Listas
+   518→   518→
+   519→   519→### 5.1 Layout de trabajo (una sola ruta visible `/`)
+   520→   520→
+   521→   521→```
+   522→   522→┌──────────┬─────────────────────────────┬──────────────┐
+   523→   523→│ IZQUIERDA│        CENTRO               │  DERECHA     │
+   524→   524→│ Asset +  │  VectorStage (SVG nativo)   │  Inspector   │
+   525→   525→│ Layers   │  zoom/pan · selección       │  preset      │
+   526→   526→│ (virtual.│  recolor instantáneo        │  colores     │
+   527→   527→│  >50)    │  vistas: editar | tintas    │  exportación │
+   528→   528→└──────────┴─────────────────────────────┴──────────────┘
+   529→   529→```
+   530→   530→
+   531→   531→### 5.2 Iteración dinámica sobre capas y colores
+   532→   532→
+   533→   533→- Fuente de verdad: `projectSlice.layers` (espejo del servidor + ediciones locales); cada nodo React usa `key = layer.id` (nunca el índice).
+   534→   534→- El SVG se renderiza como `<g data-layer-id>` por capa con `path.fill = layer.colorHex`; la visibilidad (`layer.visible === false`) se traduce en `display="none"` (no desmontaje: preserva el DOM para undo inmediato).
+   535→   535→- **Degradación segura de campos:** `colorHex` inválido en datos leídos (p. ej. historial antiguo) → se aplica el color de rescate de configuración `rendering.fallbackColorHex` (#FF00FF “magenta de rescate”, imposible de confundir) + chip de diagnóstico en la capa afectada. Nunca se pinta silenciosamente otro color del mismo rango: el magenta denuncia el problema.
+   536→   536→
+   537→   537→### 5.3 Interacción en el lienzo (presupuesto <100 ms con imagen 2000×2000)
+   538→   538→
+   539→   539→| Operación | Mecanismo | Complejidad | Presupuesto |
+   540→   540→|---|---|---|---|
+   541→   541→| Selección de zona | `pointerdown` + `closest('[data-layer-id]')` (hit-test nativo del DOM) | O(profundidad del nodo) | < 10 ms |
+   542→   542→| Recoloreo | cambio de `fill` en los paths del grupo + comando al historial; sin re-render React del árbol (refs directas) | O(paths de la capa) | < 16 ms (1 frame) |
+   543→   543→| Zoom/pan | mutación de `viewBox` en `toolSlice` (no re-renderiza capas) | O(1) | < 16 ms |
+   544→   544→| Arrastre de orden | dnd-kit sobre lista virtualizada → `ReorderLayerCommand` | O(visible) | < 50 ms |
+   545→   545→| Aislar capa (solo) | toggle `display` del resto | O(n capas) | < 30 ms |
+   546→   546→
+   547→   547→Mecanismos: `React.memo` en `LayerRow`; selectores finos de Zustand (`useProjectStore(s => s.layersById.get(id))`); `useMemo` del árbol visible; refs al DOM SVG para mutaciones hot-path (el color no pasa por React hasta persistir). **Estado de esta tabla:** presupuesto declarado a nivel de diseño (verificación estática); protocolo de medición real con fixtures en `docs/fixtures/README.md` (PerformanceObserver + user timing). No se afirma ejecución no realizada.
+   548→   548→
+   549→   549→### 5.4 Listas infinitas
+   550→   550→
+   551→   551→- **Servidor:** cursor `?limit=&cursor=` en TODOS los listados (3.1).
+   552→   552→- **Cliente:** `LayerPanel` con `react-window` cuando `layers.length > rendering.virtualizationThreshold` (50, config); `ProjectsDrawer` siempre virtualizado (n puede ser 500). Claves estables (`id`), sin índices.
+   553→   553→- **SELECT explícito** en Prisma con columnas concretas por endpoint (nunca `SELECT *`).
+   554→   554→
+   555→   555→### 5.5 Estados por panel (obligatorio, sin excepciones)
+   556→   556→
+   557→   557→Cada panel implementa los cinco estados: **carga** (skeleton del mismo layout), **vacío** (CTA con acción primaria: “Carga tu primera imagen”), **error** (mensaje accionable + botón Reintentar con backoff), **parcial** (datos degradados con chip de diagnóstico no bloqueante), **listo**. Los toasts son resultado de acciones; los estados de panel son del propio panel (no se usa toast para enmascarar un panel vacío).
+   558→   558→
+   559→   559→### 5.6 Undo/redo y persistencia
+   560→   560→
+   561→   561→- Comandos en `historySlice` (aplicar/deshacer serializables, límite configurable). Persistencia: tras cada acción confirmada (recolor, reorder, rename) se hace `PATCH` del recurso afectado con reintentos; tras recarga, `GET /api/projects/:id` reconstruye el estado completo (origen + vectorización + capas + colores). El campo `visible` y el orden se persisten para que la vista “tintas” sobreviva a la recarga (requisito del listón: persistencia recuperable).
+   562→   562→
+   563→   563→---
+   564→   564→
+   565→   565→## 6. 💻 Fase 6 — Código Fuente (PREPARADA, no implementada en esta iteración)
+   566→   566→
+   567→   567→> **Estado declarado:** por acuerdo del enunciado (“solo se planifica; la Fase 6 debe quedar preparada pero no inventada”), **no existe implementación del producto en esta entrega**. Se entrega: árbol objetivo completo, firmas clave con intención, comandos exactos y **un artefacto real de configuración** (`src/lib/config/app.config.ts`, validado con Zod) que ya es ejecutable y sirve de prueba viva de la regla de cero-hardcoding (el visor de la spec lo importa y renderiza sus valores).
+   568→   568→
+   569→   569→### 6.1 Árbol objetivo
+   570→   570→
+   571→   571→```
+   572→   572→src/
+   573→   573→├─ app/
+   574→   574→│  ├─ page.tsx                      // única ruta visible: espacio de trabajo
+   575→   575→│  └─ api/
+   576→   576→│     ├─ auth/register|login|refresh/route.ts
+   577→   577→│     ├─ projects/route.ts · [id]/route.ts
+   578→   578→│     ├─ projects/[id]/assets/route.ts
+   579→   579→│     ├─ projects/[id]/vectorize/route.ts
+   580→   580→│     ├─ projects/[id]/layers/route.ts · [layerId]/route.ts
+   581→   581→│     ├─ projects/[id]/exports/route.ts
+   582→   582→│     ├─ assets/[key]/route.ts      // streaming autorizado
+   583→   583→│     └─ health/route.ts · metrics/route.ts
+   584→   584→├─ components/
+   585→   585→│  ├─ atoms/ (ColorSwatch, StateChip, …)
+   586→   586→│  ├─ molecules/ (PresetSelector, ColorField, LayerRow, QuotaMeter, …)
+   587→   587→│  └─ organisms/ (AssetPanel, LayerPanel, VectorStage, InkPrepView,
+   588→   588→│                 InspectorPanel, ProjectsDrawer, DiagnosticsPanel, ExportDialog)
+   589→   589→├─ lib/
+   590→   590→│  ├─ config/{app.config.ts ✓ real, server.config.ts}   // cliente / servidor
+   591→   591→│  ├─ domain/{entities.ts, invariants.ts, errors.ts}   // tipos + invariantes puras
+   592→   592→│  ├─ registries/{registry.ts, preset-registry.ts, exporter-registry.ts,
+   593→   593→│  │              operation-registry.ts, migrations.ts, presets/{baja,media,alta}.ts}
+   594→   594→│  ├─ vectorizer/{types.ts, engines/{vtracer-wasm.ts, imagetracer.ts}, pipeline.ts}
+   595→   595→│  ├─ bg-removal/{types.ts, engines/{imgly.ts, u2net-onnx.ts}, pipeline.ts}
+   596→   596→│  ├─ exporter/{zip.ts, formats/{zip-serigrafia.ts, png-mockup.ts}}
+   597→   597→│  ├─ storage/{adapter.ts, local.ts, s3.ts}
+   598→   598→│  ├─ auth/{jwt.ts, argon2.ts, guards.ts}
+   599→   599→│  ├─ http/{problem.ts, validate.ts, cursor.ts, rate-limit.ts}
+   600→   600→│  └─ state/{store.ts, slices/{project,tool,history,export,diagnostics,auth}.ts}
+   601→   601→├─ workers/{vectorizer.worker.ts, bg-removal.worker.ts, export.worker.ts}
+   602→   602→prisma/schema.prisma   // como en 2.3
+   603→   603→docs/                  // este plan, ADRs, diagramas, fixtures
+   604→   604→```
+   605→   605→
+   606→   606→### 6.2 Firmas clave (contratos de implementación; sin cuerpos)
+   607→   607→
+   608→   608→```ts
+   609→   609→// lib/vectorizer/types.ts
+   610→   610→export interface VectorizerEngine {
+   611→   611→  id: string; metadata: { license: 'audited-ok' | 'pending-audit' };
+   612→   612→  run(input: { imageData: ImageBitmap; params: VectorParams }, signal: AbortSignal):
+   613→   613→    Promise<VectorResult>; // VectorResult = { svg: string; nodeCount: number }
+   614→   614→}
+   615→   615→// Workers — mensajes tipados:
+   616→   616→//   { kind: 'request', jobId, … } | { kind: 'progress', jobId, phase, percent }
+   617→   617→//   { kind: 'success' | 'error' | 'cancelled', jobId, … }
+   618→   618→
+   619→   619→// lib/bg-removal/types.ts
+   620→   620→export interface BackgroundRemovalEngine {
+   621→   621→  id: string; modelUrlFrom(config: AppConfig): string;
+   622→   622→  remove(input: { imageData: ImageBitmap }, signal: AbortSignal):
+   623→   623→    Promise<{ alphaMask: ImageData }>; // reversible: la máscara es un comando del historial
+   624→   624→}
+   625→   625→
+   626→   626→// lib/exporter/types.ts
+   627→   627→export interface Exporter {
+   628→   628→  id: string; manifestSchema: z.ZodType<ExportManifest>;
+   629→   629→  build(project: ProjectSnapshot, layers: LayerView[]):
+   630→   630→    Promise<{ blob: Blob; manifest: ExportManifest }>;
+   631→   631→}
+   632→   632→
+   633→   633→// lib/storage/adapter.ts
+   634→   634→export interface StorageAdapter {
+   635→   635→  put(key: string, data: Blob, meta: { checksum: string }): Promise<{ key: string }>;
+   636→   636→  get(key: string): Promise<ReadableStream>;
+   637→   637→  delete(key: string): Promise<void>;
+   638→   638→  sign(key: string, ttlSeconds: number): Promise<string>;
+   639→   639→}
+   640→   640→
+   641→   641→// lib/http/cursor.ts
+   642→   642→export function encodeCursor(c: { createdAt: Date; id: string }): string; // base64url
+   643→   643→export function decodeCursor(raw: string): { createdAt: Date; id: string }; // valida
+   644→   644→```
+   645→   645→
+   646→   646→### 6.3 Comandos exactos (reproducibles)
+   647→   647→
+   648→   648→```bash
+   649→   649→# Entorno de esta iteración (sandbox, Bun + Next.js 16):
+   650→   650→bun install                 # dependencias
+   651→   651→bun run dev                 # desarrollo en :3000
+   652→   652→bun run db:push             # aplicar esquema Prisma (sandbox, schema-first)
+   653→   653→bun run lint                # ESLint
+   654→   654→bunx tsc --noEmit           # verificación de tipos
+   655→   655→
+   656→   656→# Camino de producción (documentado, NO ejecutado en esta iteración):
+   657→   657→# docker compose up -d        # PostgreSQL 16 + MinIO (docker-compose.yml del repo)
+   658→   658→# prisma migrate deploy       # migraciones versionadas (provider = "postgresql")
+   659→   659→# pnpm build && pnpm start    # build autónomo
+   660→   660→```
+   661→   661→
+   662→   662→### 6.4 Definition of Done de la implementación (cuando se pida)
+   663→   663→
+   664→   664→Cada punto del listón tendrá su verificación asociada (unit test, e2e Playwright, fixture perceptual); el Árbitro solo cerrará con evidencia ejecutada o con “no verificado” explícito. Esta iteración marca el protocolo, no lo ejecuta.
+   665→   665→
+   666→   666→---
+   667→   667→
+   668→   668→## 7. Ejemplo completo de extensibilidad (recorrido obligatorio del enunciado)
+   669→   669→
+   670→   670→**Añadir preset `comic`** y **formato `pdf-capas`**:
+   671→   671→
+   672→   672→```
+   673→   673→UI (inspector) lee PresetRegistry → formulario autogenerado del esquema del preset
+   674→   674→→ Worker vectorizador recibe { presetId: 'comic', params } (validado en cliente)
+   675→   675→→ POST /api/projects/:id/vectorize → http/validate.ts → PresetRegistry.get('comic').schema.safeParse
+   676→   676→→ persist Vectorization { presetId:'comic', params, paramsSchemaVersion:1 }
+   677→   677→→ GET proyecto → LayerPanel/VectorStage renderizan capas (espejo de datos, sin cambios de núcleo)
+   678→   678→→ Export: ExporterRegistry.get('pdf-capas') → export.worker ensambla → POST /api/…/exports
+   679→   679→```
+   680→   680→
+   681→   681→**Código nuevo escrito:** 1 archivo de esquema de preset + 1 entrada en el manifiesto de `app.config.ts`; 1 archivo de exportador PDF + 1 entrada en el manifiesto de formatos. **Cero cambios** en `VectorizerService`, pipeline, editor o validador central. (Extensión de *datos/variantes*: solo configuración. Extensión de *comportamiento* —p. ej. nueva herramienta de selección por cuenca—: nueva estrategia registrada en `SelectionStrategyRegistry`, con código + pruebas, sin tocar el lienzo.)
+   682→   682→
+   683→   683→---
+   684→   684→
+   685→   685→## 8. Tolerancia a fallos (resumen; detalle con ejemplos en `docs/decisions/failure-modes.md`)
+   686→   686→
+   687→   687→| Clase | Ejemplo concreto del producto | Detección | Tratamiento en UI |
+   688→   688→|---|---|---|---|
+   689→   689→| Campo opcional ausente | `project.description` no enviado | Zod | “—” en inspector; sin error |
+   690→   690→| Valor nulo | `layer.name === null` en datos leídos | guard de lectura | nombre derivado “Capa 03” + chip informativo; nunca crash |
+   691→   691→| Dato inválido | `colorHex: "#12"` en PATCH | Zod + invariante | 400 con campo exacto; formulario marca el campo |
+   692→   692→| Error temporal | timeout subiendo el ZIP de exportación | fetch/worker error | toast con “Reintentar” + backoff (3 intentos, luego diagnóstico) |
+   693→   693→| Error de autorización | token expirado a mitad de sesión | 401/404 de la API | relogin transparente con refresh; si falla, redirect a login conservando borrador local |
+   694→   694→| Error de configuración | `NEXT_PUBLIC_BG_REMOVAL_MODEL_URL` sin definir | chequeo de arranque del engine | banner bloqueante con el nombre exacto de la variable y link a docs |
+   695→   695→| Fallo crítico | OOM en el Worker de vectorización | `onerror` del worker | modal de diagnóstico + “Recuperar espacio de trabajo” (último estado persistido) + export del informe |
+   696→   696→
+   697→   697→Principio: los errores **importantes nunca se convierten** silenciosamente en defaults; los defaults solo cubren opcionales ausentes definidos por esquema. Todo fallo queda registrado en `diagnosticsSlice` con clase, causa y acción sugerida.
+   698→   698→
+   699→   699→---
+   700→   700→
+   701→   701→## 9. Cero hardcoding — dónde vive cada valor de negocio
+   702→   702→
+   703→   703→| Valor | Ubicación | Esquema |
+   704→   704→|---|---|---|
+   705→   705→| Límites de imagen (px, bytes, MIME) | `app.config.ts → limits.image` | `LimitsImageSchema` |
+   706→   706→| Máx. capas / historial / umbral virtualización | `limits.layers`, `rendering.virtualizationThreshold` | Zod |
+   707→   707→| Cuotas (proyectos, exports/día, assets/proyecto) | `limits.projects`, `limits.exports` | Zod |
+   708→   708→| Presets (ids, defaults, rangos) | `vectorization.presetManifest` + `src/lib/registries/presets/*.ts` | Zod por preset |
+   709→   709→| Paleta serigráfica con nombre | `colors.inkPalette` | Zod (hex + nombre) |
+   710→   710→| Patrones de nombre de archivo y marca de tinta | `export.filePattern`, `export.inkMarkPattern` | Zod (plantilla) |
+   711→   711→| Estrategia de orden de impresión | `export.printOrderStrategy` | Zod enum |
+   712→   712→| TTL de tokens, rate limits | `server.config.ts` (env-driven) | Zod + env |
+   713→   713→| Color de rescate de render | `rendering.fallbackColorHex` | Zod |
+   714→   714→
+   715→   715→Constantes técnicas justificadas (únicas permitidas): tamaños de cabecera HTTP, seed de hash de checksum, factor de zoom por rueda (declaradas con comentario de justificación).
+   716→   716→
+   717→   717→**Verificación viva:** el artefacto `src/lib/config/app.config.ts` está implementado, tipado y validado con Zod, y el visor de esta especificación **importa y renderiza** sus valores reales (no copias). Cambiar un límite = editar configuración, no código.
+   718→   718→
+   719→   719→---
+   720→   720→
+   721→   721→## 10. Informe del Árbitro
+   722→   722→
+   723→   723→> Se adjunta al final de esta iteración con los datos reales de la pasada adversarial (rondas, rechazos, correcciones y verificación punto por punto del listón). Ver `docs/INFORME-ARBITRO.md` y la sección homónima del visor.
+   724→   724→
+   725→   725→---
+   726→   726→
+   727→   727→## 11. Anexos
+   728→   728→
+   729→   729→- `docs/decisions/` — ADR-000…ADR-010 + `failure-modes.md` (cada ADR con *problema / coste / alternativa descartada*).
+   730→   730→- `docs/diagrams/` — `arquitectura.mmd`, `flujo-vectorizacion.mmd`, `er.mmd` (fuentes Mermaid + guía de render).
+   731→   731→- `docs/fixtures/` — imágenes de referencia + protocolo de verificación perceptual (SSIM ≥ 0,92) y de rendimiento (<100 ms).
+   732→   732→- `src/lib/config/app.config.ts` — artefacto real de configuración (Zod).
+   733→   733→- Visor navegable de esta especificación en la ruta `/` (única visible del entorno).
+   734→   734→

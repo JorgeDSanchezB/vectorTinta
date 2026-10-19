@@ -1,0 +1,19 @@
+%% VectorTinta — Flujo de vectorización punta a punta (con extensión por registro)
+flowchart LR
+  A["Cargar imagen<br/>(JPG/PNG/WebP)"] --> B{"¿Límites ok?<br/>px · bytes · MIME<br/>(app.config.ts)"}
+  B -->|"No"| ERR413["413/400 RFC 7807<br/>acción corregible"]
+  B -->|"Sí"| C["Preset desde PresetRegistry<br/>(formulario autogenerado)"]
+  C --> D["vectorizer.worker<br/>(WASM) · cancelable"]
+  D --> E["SVG resultado<br/>+ nodeCount"]
+  E --> F["Separación por color plano<br/>→ Layer[] (≤ maxLayers)"]
+  F --> G["Opcional: bg-removal.worker<br/>(máscara alfa reversible)"]
+  G --> H["Edición: recolor/orden/visibilidad<br/>undo-redo (historySlice)"]
+  H --> I["Vista Preparación de tintas<br/>HEX · área · marca de tinta · orden"]
+  I --> J["export.worker: ZIP<br/>(SVG por capa + manifest.json)"]
+  J --> K["POST /api/projects/:id/exports<br/>persist Export + manifest"]
+  K --> L["GET /api/assets/:key<br/>descarga autorizada"]
+
+  style A fill:#faf7f2,stroke:#c2410c
+  style E fill:#faf7f2,stroke:#c2410c
+  style I fill:#faf7f2,stroke:#c2410c
+  style ERR413 fill:#fff1f2,stroke:#be123c

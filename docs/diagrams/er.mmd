@@ -1,0 +1,82 @@
+%% VectorTinta — Modelo entidad-relación (Fase 2)
+erDiagram
+  User ||--o{ Project : "es dueño"
+  User ||--o{ RefreshToken : "sesiones"
+  User ||--o{ AuditEvent : "acciones"
+  Project ||--o{ Asset : "contiene"
+  Project ||--o{ Export : "genera"
+  Project ||--o{ AuditEvent : "traza"
+  Asset ||--o| Vectorization : "origen de"
+  Vectorization ||--o{ Layer : "se separa en"
+
+  User {
+    string id PK
+    string email UK
+    string name "nullable"
+    string passwordHash "argon2id"
+    string plan "free|pro (Zod)"
+    datetime createdAt
+    datetime updatedAt
+  }
+  RefreshToken {
+    string id PK
+    string userId FK
+    string tokenHash UK "sha-256"
+    datetime expiresAt
+    datetime revokedAt "nullable"
+  }
+  Project {
+    string id PK
+    string ownerId FK
+    string name "1..80"
+    string description "nullable"
+    string thumbnailKey "nullable"
+    datetime createdAt
+    datetime updatedAt
+  }
+  Asset {
+    string id PK
+    string projectId FK
+    string role "source|result|thumbnail"
+    string mimeType
+    int width
+    int height
+    int bytes
+    string storageKey UK
+    string checksum "sha-256"
+  }
+  Vectorization {
+    string id PK
+    string assetId FK
+    string engineId
+    string presetId
+    json params "validado por registro"
+    int paramsSchemaVersion
+    string svgStorageKey
+    int nodeCount
+  }
+  Layer {
+    string id PK
+    string vectorizationId FK
+    int orden "único por vectorización"
+    string colorHex "regex #RRGGBB"
+    string name
+    string svgFragmentKey
+    int areaPx
+    boolean visible
+  }
+  Export {
+    string id PK
+    string projectId FK
+    string formatId "del ExporterRegistry"
+    string storageKey
+    json manifest "validado por registro"
+    int manifestSchemaVersion
+  }
+  AuditEvent {
+    string id PK
+    string userId FK "nullable"
+    string projectId FK "nullable"
+    string action
+    json metadata "sin PII"
+  }

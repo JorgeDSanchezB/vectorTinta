@@ -1,0 +1,372 @@
+     1→# VectorTinta — Plan Maestro de Producto y Arquitectura
+     2→
+     3→**Versión:** 1.0 · **Iteración:** 1 (SOLO PLANIFICACIÓN)
+     4→**Estado:** Fases 1–5 completadas y verificadas estáticamente. Fase 6 **preparada** (estructura, firmas y comandos) pero **NO implementada**, tal y como exige el enunciado de esta iteración.
+     5→**Idioma:** castellano. **Convención de fechas:** ISO-8601, zona horaria del taller (configurable).
+     6→
+     7→---
+     8→
+     9→## 0. Resumen ejecutivo
+    10→
+    11→**VectorTinta** es un estudio web para talleres de serigrafía y diseñadores gráficos que transforma una imagen raster (JPG/PNG/WebP) en un SVG vectorial editable y, desde ahí, permite: eliminar el fondo en el navegador, recolorear por zonas, separar en capas por color plano y preparar la exportación serigráfica (un SVG por tinta + `manifest.json` con el orden de impresión, empaquetados en ZIP).
+    12→
+    13→El procesamiento pesado (vectorización WASM, eliminación de fondo ONNX, empaquetado ZIP) se ejecuta **íntegramente en el cliente** dentro de Web Workers: la imagen original no viaja a ningún servidor para ser procesada. El backend se limita a persistencia, autenticación, cuotas, listados paginados y trazabilidad.
+    14→
+    15→**Decisión de entorno (resumida, ver ADR-000):** el enunciado plantea Vite+Fastify+PostgreSQL+MinIO. El entorno de ejecución real de esta iteración es un único servicio Next.js 16 con un solo puerto expuesto, Prisma y SQLite. La arquitectura se diseña con **puertos y adaptadores** (interfaces `StorageAdapter`, `VectorizerEngine`, `BackgroundRemovalEngine`, `Exporter`, repositorios) de modo que el paso a PostgreSQL/S3/Fastify sea sustitución de adaptador, no rediseño. Cada desviación del stack propuesto está justificada con formato *problema / coste / alternativa descartada* en `docs/decisions/`.
+    16→
+    17→**Índice de fases:**
+    18→
+    19→| Fase | Contenido | Estado |
+    20→|---|---|---|
+    21→| 1 | Plan estratégico | ✅ Completada |
+    22→| 2 | Modelado de datos | ✅ Completada |
+    23→| 3 | Contratos API | ✅ Completada |
+    24→| 4 | Lógica de inserción extensible | ✅ Completada |
+    25→| 5 | Renderizado dinámico y listas | ✅ Completada |
+    26→| 6 | Código fuente | 🔒 Preparada (sin implementar, por acuerdo) |
+    27→| — | Informe del Árbitro | Se anexa al final de la iteración con datos reales de la pasada adversarial |
+    28→
+    29→---
+    30→
+    31→## 1. 🏗️ Fase 1 — Plan Estratégico
+    32→
+    33→### 1.1 Objetivo y alcance
+    34→
+    35→**Objetivo de producto.** Que un diseñador o un taller de estampación pase de “tengo un JPG del cliente” a “tengo mis fotolistos separados por tinta” sin abrir Illustrator ni instalar nada. Nivel de ambición del listón: herramienta que un profesional pagaría 20 €/mes sin dudar.
+    36→
+    37→**Dentro del alcance (v1):**
+    38→1. Cargar imagen raster (JPG/PNG/WebP) con validación de límites (píxeles, bytes, MIME) — límites en configuración, no en código.
+    39→2. Vectorizar con **presets** (baja/media/alta) + parámetros avanzados validados por esquema (Fase 4).
+    40→3. Eliminar fondo **en el navegador** (ONNX en Web Worker) con reversibilidad (undo).
+    41→4. Recolorear zonas/capas sobre el lienzo con previsualización instantánea y undo/redo.
+    42→5. Separar en capas por color plano; renombrar, reordenar, ocultar, aislar.
+    43→6. Vista **Preparación de tintas**: por capa, color (HEX + nombre), área cubierta (px y %), marca de tinta única y orden de impresión.
+    44→7. Exportación serigráfica: ZIP con un SVG por capa + `manifest.json` (orden de impresión, colores, áreas, checksums) + exportadores adicionales registrables (mockup PNG, PDF por capa en el futuro).
+    45→8. Persistencia de proyecto: origen, parámetros, capas, colores y exportaciones; recuperación tras recarga.
+    46→9. Listado de proyectos del usuario paginado por cursor.
+    47→
+    48→**Fuera del alcance (v1, documentado para no inflar):**
+    49→- Colaboración multiusuario en tiempo real (el backend la habilita por diseño — `ownerId` + `AuditEvent` — pero no hay UI en v1; se declara explícitamente).
+    50→- Edición de nodos Bézier manual (no es un editor vectorial generalista: es un preparador serigráfico).
+    51→- Modo móvil avanzado: en móvil se advierte la degradación (banner de rendimiento) y se permiten solo consulta y exportación ligera; la edición pesada se declara experiencia de escritorio (supuesto S-03).
+    52→
+    53→### 1.2 Actores y casos de uso principales
+    54→
+    55→| Actor | Descripción | Casos de uso |
+    56→|---|---|---|
+    57→| **Diseñador gráfico** | Prepara arte final del cliente | UC-1 vectorizar con preset; UC-3 recolorear por zona; UC-5 exportar SVG por capa; UC-7 persistir y recuperar proyecto |
+    58→| **Operario de taller** | Prepara pantallas y tintas | UC-4 separar por color; UC-6 vista de tintas con HEX, área y orden; UC-8 imprimir manifest/ZIP |
+    59→| **Cuentas del plan** | Usuario autenticado con cuota | UC-9 gestionar proyectos (listado paginado, renombrar, borrar); UC-10 respetar/consultar cuota |
+    60→| **Visitante evaluador** | Prueba sin registro | Modo local (todo en cliente, sin persistir); banner informativo; sin datos personales |
+    61→
+    62→### 1.3 Supuestos (numerados; si se rompen, se reabre el plan)
+    63→
+    64→- **S-01** Imágenes de entrada ≤ 4096×4096 px y ≤ 15 MiB (valores por defecto **configurables**, ver `app.config.ts`). El 95 % de artes para serigrafía cabe holgado.
+    65→- **S-02** Navegadores de escritorio actuales con WASM, Web Workers y `OffscreenCanvas` (Chromium/WebKit/Firefox de los últimos 24 meses).
+    66→- **S-03** La edición de calidad es experiencia de escritorio; móvil = consulta + avisos.
+    67→- **S-04** Un proyecto = un arte final; máximo 30 capas por vectorización y 20 proyectos por usuario gratuito (configurables).
+    68→- **S-05** Las capas se derivan de colores planos del resultado vectorial; no hay detección semántica de “objetos”.
+    69→- **S-06** El cliente es fiable para los metadatos declarativos (dimensiones, checksum) y el servidor los revalida parcialmente (bytes, MIME); el sondeo de píxeles en servidor queda como endurecimiento de producción (ver 3.x).
+    70→- **S-07** No se procesa PII en las imágenes; la imagen pertenece al proyecto del usuario y no se usa para nada más.
+    71→
+    72→### 1.4 Riesgos y mitigaciones
+    73→
+    74→| # | Riesgo | Prob. | Impacto | Mitigación |
+    75→|---|---|---|---|---|
+    76→| R-01 | **Licencias del motor WASM** (vtracer: licencia original restrictiva; ports npm con licencias dispares; potrace: GPL) | Media | Alto (bloquea producto comercial) | `VectorizerEngine` como puerto con 2 adaptadores: `vtracer-wasm` (pendiente de auditoría de licencia, marcado en el propio archivo) e `imagetracer.js` (dominio público/Unlicense, fallback seguro). Decisión bloqueante documentada; **no** se elige licencia sin verificación real. Ver ADR-001. |
+    77→| R-02 | **Licencia del modelo/bg-removal** (`@imgly/background-removal` tiene condiciones de uso propias; el modelo subyacente ISNet/U²-Net pesa Apache-2.0) | Media | Alto | Puerto `BackgroundRemovalEngine`; adaptador `imgly` marcado “verificar licencia antes de producción”; alternativa documentada: port ONNX de U²-Net con `onnxruntime-web` (Apache-2.0). Ver ADR-009. |
+    78→| R-03 | **Calidad perceptual del SVG** insuficiente en fotos | Media | Alto | Presets por caso de uso + métrica objetivo SSIM ≥ 0,92 con fixtures reproducibles (`docs/fixtures/`), umbral y protocolo documentados; inspección visual del árbitro en implementación. |
+    79→| R-04 | Rendimiento/memoria en imágenes grandes (WASM + ONNX) | Media | Medio | Límite de píxeles configurable; Workers cancelables; presupuesto <100 ms por interacción (5.3); degradación explícita, nunca cuelgue silencioso. |
+    80→| R-05 | Móvil/tableta lento con WASM | Alta | Medio | S-03: banner de degradación + bloqueo de operaciones O(píxeles) en pantallas pequeñas (configuración `limits.mobile`). |
+    81→| R-06 | Abuso de cuota/almacenamiento | Media | Medio | Cuotas por configuración + rate limiting + `AuditEvent` para trazabilidad. |
+    82→| R-07 | SQLite con escrituras concurrentes en sandbox | Baja | Bajo (solo demo) | ADR-005: SQLite solo para esta iteración; el esquema es dialecto-agnóstico y el salto a PostgreSQL es cambio de `provider` + migraciones. |
+    83→| R-08 | Falta de entorno de ejecución del producto en esta iteración | Cierta | Medio | Honestidad epistémica: verificación estática del diseño + protocolos de verificación reproducibles por punto del listón (sección 10). Nada de resultados inventados. |
+    84→
+    85→### 1.5 Arquitectura general
+    86→
+    87→Tres niveles con puertos explícitos (diagrama completo en `docs/diagrams/arquitectura.mmd`):
+    88→
+    89→```
+    90→┌────────────────────────────  CLIENTE  ────────────────────────────┐
+    91→│  UI: Next.js 16 (App Router) · React 19 · TS · Tailwind 4 ·        │
+    92→│      shadcn/ui (Radix) · Zustand (slices) · react-window            │
+    93→│  Lienzo: SVG nativo interactivo (viewBox zoom/pan, hit-test DOM)   │
+    94→│  Web Workers: vectorizador (WASM) · bg-removal (ONNX) · export ZIP │
+    95→│  Puertos: VectorizerEngine · BackgroundRemovalEngine · Exporter ·   │
+    96→│           SelectionStrategy · StorageGateway (cliente→API)         │
+    97→└───────────────┬───────────────────────────────────────────────────┘
+    98→                │ REST + JSON · JWT Bearer · RFC 7807 en errores
+    99→┌───────────────▼────────────  API (Route Handlers)  ────────────────┐
+   100→│  Validación Zod (strict) · Autenticación (jose JWT + argon2) ·      │
+   101→│  Rate limiting · Paginación cursor (createdAt,id) · Cuotas ·       │
+   102→│  Problemas RFC 7807 · Registries: Preset/Exporter/Operation        │
+   103→└───────┬─────────────────────────────────────────┬─────────────────┘
+   104→        │                                           │
+   105→┌───────▼────────────────┐            ┌─────────────▼────────────────┐
+   106→│  Prisma ORM            │            │  StorageAdapter (puerto)      │
+   107→│  SQLite (sandbox) →    │            │  Local FS (sandbox) →          │
+   108→│  PostgreSQL 16 (prod)  │            │  S3/MinIO/R2 (prod)           │
+   109→└────────────────────────┘            └──────────────────────────────┘
+   110→```
+   111→
+   112→**Capas de dominio / aplicación / infraestructura (versión simplificada y declarada):** el tamaño del producto justifica hexagonal *light*: `src/lib/domain` (entidades + invariantes + errores de dominio), `src/lib/services` (casos de uso: crear proyecto, persistir vectorización, encolar exportación…), `src/lib/adapters` (implementaciones: Prisma, storage local/S3, motores). No se introduce un bus de eventos ni un contenedor DI: coste > beneficio (alternativa descartada: hexagonal completo con use-cases aislados y DI; se documenta en ADR-008).
+   113→
+   114→### 1.6 Estructura de componentes (Átomos → Moléculas → Organismos → Página)
+   115→
+   116→- **Átomos:** `Button`, `Badge`, `Tooltip`, `Slider`, `Switch`, `Skeleton`, `ColorSwatch` (muestra HEX accesible con nombre), `StateChip` (estado de validación).
+   117→- **Moléculas:** `PresetSelector` (generado desde el esquema del preset, ver 4.4), `ColorField` (HEX + paleta serigráfica de configuración), `LayerRow` (memoizada; clave `layer.id`), `QuotaMeter`, `DiagnosticsToast`, `CommandButton`.
+   118→- **Organismos:** `AssetPanel` (carga + validación), `LayerPanel` (árbol virtualizado), `VectorStage` (lienzo SVG interactivo), `InkPrepView` (preparación de tintas), `InspectorPanel` (propiedades, exportación), `ProjectsDrawer` (listado paginado por cursor), `DiagnosticsPanel` (taxonomía de fallos), `ExportDialog`.
+   119→- **Página:** una única ruta visible `/` (restricción del entorno); el espacio de trabajo conmuta vistas internas por estado (carga → editar → tintas → exportar). En producción con enrutado completo serían `/`, `/proyectos`, `/proyectos/[id]`; se documenta la equivalencia.
+   120→
+   121→### 1.7 Gestión de estado (Zustand + slices) — justificación
+   122→
+   123→- **Zustand** frente a Redux Toolkit: el estado es mediano y de alta frecuencia de actualización local (selección, zoom, colores). Zustand con selectores evita re-renders globales sin ceremonia de actions/reducers/dispatch. *Coste:* disciplina de selectores. *Alternativa descartada:* Redux (más boilerplate, indirección extra no justificada); TanStack Query se usa para el **estado de servidor** (proyectos, exports) y Zustand para el **estado de sesión de trabajo** (ADR-004).
+   124→- **Slices:**
+   125→  - `projectSlice`: proyecto activo, assets, vectorización, capas (espejo de servidor + cambios pendientes).
+   126→  - `toolSlice`: herramienta activa, zoom/pan, selección, capas aisladas.
+   127→  - `historySlice`: pila undo/redo de comandos (patrón Command), límite configurable (100).
+   128→  - `exportSlice`: estado de exportaciones en curso (worker), progreso, resultados.
+   129→  - `diagnosticsSlice`: registro clasificado de fallos (seis clases, ver 8).
+   130→  - `authSlice`: sesión, tokens, cuota restante.
+   131→- **Undo/redo:** comandos puros (`RecolorLayersCommand`, `RemoveBackgroundCommand`, `ToggleVisibilityCommand`, `RenameLayerCommand`, `ReorderLayerCommand`) con `apply/undo`, serializables y acotados por `limits.layers.historyStackSize`.
+   132→
+   133→### 1.8 Decisiones técnicas (resumen; detalle en ADRs)
+   134→
+   135→| # | Decisión | Problema que resuelve | Coste | Alternativa descartada | ADR |
+   136→|---|---|---|---|---|---|
+   137→| D-01 | Vectorización WASM **en cliente** | Coste/latencia de servidor + privacidad | Bundle ≈1–2 MiB; memoria del tab; complejidad de Workers | Vectorizar en servidor (coste por conversión, subida obligatoria de la imagen) | ADR-001 |
+   138→| D-02 | **SVG nativo interactivo** para el lienzo | Los datos ya son paths SVG: hit-test y recolor nativos, export = serializar | Rendimiento DOM con >>10⁴ nodos (mitigado por capas/visibilidad) | Konva/Fabric (convierte paths a escena canvas, doble estado, export requiere re-serializar) | ADR-002 |
+   139→| D-03 | **Workers** (1 por tipo de tarea, cancelables) | No congelar el hilo principal; O(píxeles) en background | Complejidad de mensajes/transferables | Todo en hilo principal (jank) o pool genérico (sobreingeniería) | ADR-003 |
+   140→| D-04 | **Zustand slices** | Estado local de alta frecuencia sin re-renders globales | Disciplina de selectores | Redux Toolkit | ADR-004 |
+   141→| D-05 | **Prisma + SQLite (sandbox) → PostgreSQL (prod)** | Persistencia relacional con migraciones | Sin enums nativos en SQLite → validación Zod en el borde | Mongoose/NoSQL (no hay razón: los datos son relacionales) | ADR-005 |
+   142→| D-06 | **StorageAdapter** local→S3 | Almacenamiento de objetos portable | Una indirección | Disco local acoplado (insalvable en prod) | ADR-006 |
+   143→| D-07 | **JWT acceso+refresco con jose + argon2** | Contrato del enunciado (access+refresh, argon2) | Rotación/revocación requiere tabla `RefreshToken` | NextAuth v4 (flujo de refresh con Credentials no es de primera clase) | ADR-007 |
+   144→| D-08 | **Registros con esquemas** (Preset/Exporter/Operation/Selection) | Extensión sin tocar núcleo (regla del carro) | Coste de indirección acotado y documentado | `switch` central (viola la regla del carro) | ADR-008 |
+   145→| D-09 | **Bg-removal ONNX en cliente** | Privacidad + coste cero de servidor | Descarga de modelo (10–40 MiB) gestionada con aviso | API externa de pago (rompe “sin subir la imagen”) | ADR-009 |
+   146→| D-10 | **Cursor compuesto (createdAt,id)** | Paginación estable con orden temporal | Codificación base64url + OR en query | OFFSET (salta filas con escrituras concurrentes) | ADR-010 |
+   147→| D-11 | **Next.js 16 unificado** (route handlers como API) | Restricción real del entorno (1 puerto) | Sin escalado independiente del API en esta iteración | Separar Fastify ahora (no aporta en sandbox; plan de extracción documentado) | ADR-000 |
+   148→
+   149→### 1.9 Mapa de módulos (equivalencia con el monorepo propuesto)
+   150→
+   151→El enunciado propone `packages/vectorizer`, `packages/bg-removal`, `packages/exporter`, `apps/web`, `apps/api`. En un único repo Next.js, los “paquetes” son módulos con límite de importación declarado:
+   152→
+   153→| Paquete propuesto | Módulo real (Fase 6) | Exporta (puertos) |
+   154→|---|---|---|
+   155→| `packages/vectorizer` | `src/lib/vectorizer/` + `src/workers/vectorizer.worker.ts` | `VectorizerEngine`, `VectorParams`, `parseSvgResult` |
+   156→| `packages/bg-removal` | `src/lib/bg-removal/` + `src/workers/bg-removal.worker.ts` | `BackgroundRemovalEngine`, `AlphaMaskResult` |
+   157→| `packages/exporter` | `src/lib/exporter/` + `src/workers/export.worker.ts` | `Exporter`, `ExporterRegistry`, manifest types |
+   158→| `apps/web` | `src/app/` + `src/components/` | UI |
+   159→| `apps/api` | `src/app/api/**/route.ts` + `src/lib/http/` | contratos REST (Fase 3) |
+   160→
+   161→### 1.10 Complejidad declarada de las operaciones pesadas
+   162→
+   163→| Operación | Complejidad | Memoria típica | Estrategia | Límite práctico (config) |
+   164→|---|---|---|---|---|
+   165→| Vectorización | O(W·H) muestreo + O(paths) trazado | 2–4× tamaño raster | Worker propio, streaming de progreso, cancelable | `maxPixels` 4096² |
+   166→| Eliminación de fondo | O(W·H·modelo) (ONNX) | modelo (10–40 MiB) + buffers | Worker propio, carga de modelo perezosa con consentimiento visible | `maxPixels` + aviso de descarga |
+   167→| Separación en capas | O(paths) agrupación por color exacto | O(paths) | En cliente, sobre el parse del SVG | `maxLayers` 30 (merge forzoso por cercanía, configurable) |
+   168→| Exportación ZIP | O(bytes SVG por capa) | O(total bytes) | Worker propio (fflate) | `maxLayers` |
+   169→| Listados servidor | O(log n + limit) por índice compuesto | O(limit) | Cursor `createdAt,id`, `SELECT` explícito | `pagination.maxLimit` 100 |
+   170→| Render del árbol de capas | O(visible) con virtualización | O(umbral) | react-window > `virtualizationThreshold` (50) | — |
+   171→
+   172→---
+   173→
+   174→## 2. 🧬 Fase 2 — Modelado de Datos
+   175→
+   176→### 2.1 Convenciones
+   177→
+   178→- Toda entidad: `id` (UUID) + `createdAt`; mutables añaden `updatedAt`.
+   179→- Primitivos de esquema sin listas embebidas; los atributos dinámicos van en columnas `Json` validadas por Zod en el borde (Fase 4).
+   180→- SQLite no tiene enums nativos: los campos “enum” son `String` validados por Zod en la capa HTTP (ADR-005).
+   181→- Borrado en cascada desde `Project` (política `Cascade`): un proyecto y sus datos son una unidad de privacidad.
+   182→
+   183→### 2.2 Entidades principales
+   184→
+   185→| Entidad | Campos clave | Invariantes / validaciones |
+   186→|---|---|---|
+   187→| `User` | `id`, `email` (único), `name?`, `passwordHash` (argon2id), `plan` ('free'\|'pro'), `createdAt`, `updatedAt` | email RFC; password ≥ `auth.passwordMinLength` (10); nunca se devuelve `passwordHash` (SELECT explícito) |
+   188→| `RefreshToken` | `id`, `userId`, `tokenHash` (sha-256), `expiresAt`, `revokedAt?`, `createdAt` | rotación en cada uso; un token vale exactamente 1 vez; revocación en logout/robo |
+   189→| `Project` | `id`, `ownerId→User`, `name`, `description?` (nullable), `thumbnailKey?`, `createdAt`, `updatedAt` | `name` 1..`projects.nameMaxLength` (80); contaje por usuario ≤ `projects.maxPerUserFree` (cuota → 409 problema) |
+   190→| `Asset` | `id`, `projectId→Project`, `role` ('source'\|'result'\|'thumbnail'), `mimeType`, `width`, `height`, `bytes`, `storageKey`, `checksum` (sha-256), `createdAt` | MIME ∈ `limits.image.allowedMimeTypes`; `bytes>0 ≤ maxUploadBytes`; `1 ≤ width,height ≤ maxDimension`; `checksum` hex 64 |
+   191→| `Vectorization` | `id`, `assetId→Asset`, `engineId`, `presetId`, `params` (Json), `paramsSchemaVersion`, `svgStorageKey`, `nodeCount`, `createdAt` | `presetId` ∈ PresetRegistry; `params` valida contra el esquema del preset; `nodeCount>0` |
+   192→| `Layer` | `id`, `vectorizationId→Vectorization`, `orden`, `colorHex`, `name`, `svgFragmentKey`, `areaPx`, `visible`, `createdAt` | `colorHex` matchea `^#[0-9A-Fa-f]{6}$`; `orden` único por vectorización (0..maxLayers-1); `areaPx ≥ 0` |
+   193→| `Export` | `id`, `projectId→Project`, `formatId`, `storageKey`, `manifest` (Json), `manifestSchemaVersion`, `createdAt` | `formatId` ∈ ExporterRegistry; `manifest` valida contra el esquema del formato |
+   194→| `AuditEvent` | `id`, `userId?`, `projectId?`, `action` (string tipado), `metadata` (Json), `createdAt` | solo añadir; sin PII en `metadata` (guard de Fase 4); retención configurable |
+   195→
+   196→### 2.3 Esquema Prisma (referencia de Fase 6; dialecto SQLite, equivalente en PostgreSQL)
+   197→
+   198→```prisma
+   199→// prisma/schema.prisma — Fase 6 (preparada, no aplicada en esta iteración)
+   200→generator client { provider = "prisma-client-js" }
+   201→datasource db { provider = "sqlite" url = env("DATABASE_URL") } // prod: provider = "postgresql"
+   202→
+   203→model User {
+   204→  id           String   @id @default(uuid())
+   205→  email        String   @unique
+   206→  name         String?
+   207→  passwordHash String
+   208→  plan         String   @default("free") // Zod enum en el borde: 'free' | 'pro'
+   209→  createdAt    DateTime @default(now())
+   210→  updatedAt    DateTime @updatedAt
+   211→  projects      Project[]
+   212→  refreshTokens RefreshToken[]
+   213→  auditEvents   AuditEvent[]
+   214→}
+   215→
+   216→model RefreshToken {
+   217→  id        String    @id @default(uuid())
+   218→  userId    String
+   219→  tokenHash String    @unique
+   220→  expiresAt DateTime
+   221→  revokedAt DateTime?
+   222→  createdAt DateTime  @default(now())
+   223→  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+   224→  @@index([userId, expiresAt])
+   225→}
+   226→
+   227→model Project {
+   228→  id           String   @id @default(uuid())
+   229→  ownerId      String
+   230→  name         String
+   231→  description  String?
+   232→  thumbnailKey String?
+   233→  createdAt    DateTime @default(now())
+   234→  updatedAt    DateTime @updatedAt
+   235→  owner        User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+   236→  assets       Asset[]
+   237→  exports      Export[]
+   238→  auditEvents  AuditEvent[]
+   239→  @@index([ownerId, createdAt, id]) // índice del cursor de listado
+   240→}
+   241→
+   242→model Asset {
+   243→  id         String   @id @default(uuid())
+   244→  projectId  String
+   245→  role       String   // Zod: 'source' | 'result' | 'thumbnail'
+   246→  mimeType   String
+   247→  width      Int
+   248→  height     Int
+   249→  bytes      Int
+   250→  storageKey String   @unique
+   251→  checksum   String
+   252→  createdAt  DateTime @default(now())
+   253→  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+   254→  vectorizations Vectorization[]
+   255→  @@index([projectId, createdAt, id])
+   256→}
+   257→
+   258→model Vectorization {
+   259→  id                  String   @id @default(uuid())
+   260→  assetId             String
+   261→  engineId            String   // p. ej. 'vtracer-wasm' | 'imagetracer'
+   262→  presetId            String   // p. ej. 'baja' | 'media' | 'alta' | 'comic' (futuro)
+   263→  params              Json     // validado contra PresetRegistry.get(presetId).schema
+   264→  paramsSchemaVersion Int
+   265→  svgStorageKey       String
+   266→  nodeCount           Int
+   267→  createdAt           DateTime @default(now())
+   268→  asset               Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+   269→  layers              Layer[]
+   270→  @@index([assetId, createdAt, id])
+   271→}
+   272→
+   273→model Layer {
+   274→  id              String       @id @default(uuid())
+   275→  vectorizationId String
+   276→  orden           Int
+   277→  colorHex        String
+   278→  name            String
+   279→  svgFragmentKey  String
+   280→  areaPx          Int
+   281→  visible         Boolean      @default(true)
+   282→  createdAt       DateTime     @default(now())
+   283→  vectorization   Vectorization @relation(fields: [vectorizationId], references: [id], onDelete: Cascade)
+   284→  @@unique([vectorizationId, orden]) // invariante: orden único por vectorización
+   285→  @@index([vectorizationId])
+   286→}
+   287→
+   288→model Export {
+   289→  id                    String   @id @default(uuid())
+   290→  projectId             String
+   291→  formatId              String   // ExporterRegistry: 'zip-serigrafia' | 'png-mockup' | 'pdf-capas' (futuro)
+   292→  storageKey            String
+   293→  manifest              Json     // validado contra ExporterRegistry.get(formatId).manifestSchema
+   294→  manifestSchemaVersion Int
+   295→  createdAt             DateTime @default(now())
+   296→  project               Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+   297→  @@index([projectId, createdAt, id]) // índice del cursor de exportaciones
+   298→}
+   299→
+   300→model AuditEvent {
+   301→  id        String   @id @default(uuid())
+   302→  userId    String?
+   303→  projectId String?
+   304→  action    String   // tipado por unión literal de Zod en el borde
+   305→  metadata  Json
+   306→  createdAt DateTime @default(now())
+   307→  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+   308→  project    Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+   309→  @@index([userId, createdAt, id])
+   310→  @@index([projectId, createdAt, id])
+   311→}
+   312→```
+   313→
+   314→### 2.4 Atributos dinámicos (Json) y versionado
+   315→
+   316→- `Vectorization.params`, `Export.manifest`, `AuditEvent.metadata` son columnas `Json` **encapsuladas**: solo se escriben tras `safeParse` contra el esquema del registro correspondiente (Fase 4) y se revalidan al leer con **migradores por versión** (`MigrationRegistry`: `v→v+1` encadenables). Nunca se confía en el JSON almacenado.
+   317→- Restricciones transversales (config): tamaño máximo de payload JSON (`limits.json.maxBytes`), profundidad máxima (`maxDepth`), claves peligrosas bloqueadas (`__proto__`, `constructor`, `prototype`) y guard anti-PII (patrones email/teléfono → rechazo con problema `invalid-params`).
+   318→
+   319→### 2.5 Índices, restricciones y migraciones
+   320→
+   321→- Índices compuestos `(owner|project|userId, createdAt, id)` exactamente donde pagina el cursor (ADR-010).
+   322→- Únicos: `User.email`, `Asset.storageKey`, `RefreshToken.tokenHash`, `@@unique([vectorizationId, orden])`.
+   323→- Estrategia: en sandbox `prisma db push` (schema-first sin datos que preservar); en producción `prisma migrate dev` en desarrollo y `prisma migrate deploy` en CI/CD, con revisión de drift. El esquema es idéntico en ambos dialectos salvo `provider` (ADR-005).
+   324→
+   325→---
+   326→
+   327→## 3. 📡 Fase 3 — Contratos API
+   328→
+   329→### 3.1 Reglas transversales
+   330→
+   331→- **Base:** `/api/**`. JSON salvo multipart.
+   332→- **Autenticación:** `Authorization: Bearer <accessToken>` (JWT, TTL 15 min). Refresco: `POST /api/auth/refresh` con cookie `httpOnly; SameSite=Lax` o body; rotación obligatoria (ADR-007).
+   333→- **Autorización:** todo recurso bajo `/api/projects/:id/**` verifica `project.ownerId === token.sub`. Recursos ajenos devuelven **404** (no 403) para no filtrar existencia; el 403 queda reservado a acciones con rol insuficiente sobre recursos propios (p. ej., exportar con cuota agotada devuelve 409, no 403). Taxonomía completa en 8 y `failure-modes.md`.
+   334→- **Paginación:** TODOS los listados aceptan `?limit=` y `?cursor=`. Cursor = `base64url(createdAtISO + "|" + id)`; orden `createdAt DESC, id DESC`. `limit` por defecto 20, máximo 100 (config). `nextCursor: null` = fin.
+   335→- **Validación:** Zod `.strict()` en body/query; desconocidos → 400 con detalle por campo. Multipart con tope de tamaño comprobado en `Content-Length` ANTES de leer el cuerpo (413 si excede).
+   336→- **Errores:** RFC 7807 en TODOS los errores 4xx/5xx:
+   337→
+   338→```json
+   339→{
+   340→  "type": "https://vectortinta.example/problems/cuota-proyectos",
+   341→  "title": "Cuota de proyectos excedida",
+   342→  "status": 409,
+   343→  "detail": "El plan free permite 20 proyectos. Borra uno o pasa a pro.",
+   344→  "instance": "/api/projects",
+   345→  "errors": [{ "field": "name", "code": "quota_exceeded", "limit": 20 }]
+   346→}
+   347→```
+   348→
+   349→- **Rate limiting:** ventana deslizante en memoria (prod: Redis — sustitución de adaptador). Por configuración: general 100 req/min/IP, auth 10 req/min/IP, mutaciones 30 req/min/usuario. 429 con cabecera `Retry-After` y problema RFC 7807.
+   350→- **SELECT explícito:** ninguna consulta usa `findMany` sin `select` de columnas concretas (regla de listón).
+   351→
+   352→### 3.2 Catálogo de endpoints
+   353→
+   354→| Método | Ruta | Auth | Rate limit | Paginación | Errores típicos |
+   355→|---|---|---|---|---|---|
+   356→| POST | `/api/auth/register` | — | auth | — | 400 validación, 409 email existente |
+   357→| POST | `/api/auth/login` | — | auth | — | 401 credenciales |
+   358→| POST | `/api/auth/refresh` | cookie/body | auth | — | 401 token revocado/expirado |
+   359→| POST | `/api/projects` | Bearer | mutaciones | — | 400, 409 cuota |
+   360→| GET | `/api/projects?limit=&cursor=` | Bearer | general | ✅ cursor | 400 límites |
+   361→| GET | `/api/projects/:id` | Bearer | general | — | 401, 404 |
+   362→| PATCH | `/api/projects/:id` | Bearer | mutaciones | — | 400, 404 |
+   363→| DELETE | `/api/projects/:id` | Bearer | mutaciones | — | 404 |
+   364→| POST | `/api/projects/:id/assets` | Bearer | mutaciones | — | 413 tamaño, 400 MIME/dimensiones, 409 cuota de assets |
+   365→| GET | `/api/projects/:id/assets?limit=&cursor=` | Bearer | general | ✅ cursor | 404 |
+   366→| POST | `/api/projects/:id/vectorize` | Bearer | mutaciones | — | 400 preset/params inválidos, 409 capas > máximo |
+   367→| POST | `/api/projects/:id/layers` | Bearer | mutaciones | — | 400, 409 maxLayers |
+   368→| PATCH | `/api/projects/:id/layers/:layerId` | Bearer | mutaciones | — | 400 colorHex/orden inválido, 404 |
+   369→| GET | `/api/projects/:id/layers?limit=&cursor=` | Bearer | general | ✅ cursor | 404 |
+   370→| POST | `/api/projects/:id/exports` | Bearer | mutaciones | — | 400 formato, 409 cuota diaria |
+
+[showing lines 1-370 of 734; use offset=371 with limit to continue reading]

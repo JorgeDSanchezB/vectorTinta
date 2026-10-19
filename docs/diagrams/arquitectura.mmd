@@ -1,0 +1,36 @@
+%% VectorTinta — Arquitectura de tres niveles con puertos y adaptadores
+flowchart TB
+  subgraph CLIENTE["Cliente (navegador)"]
+    UI["UI Next.js 16 + React 19<br/>Tailwind 4 · shadcn/ui · Zustand slices<br/>react-window"]
+    STAGE["VectorStage (SVG nativo)<br/>viewBox zoom/pan · hit-test DOM"]
+    W1["vectorizer.worker<br/>(WASM)"]
+    W2["bg-removal.worker<br/>(ONNX)"]
+    W3["export.worker<br/>(ZIP)"]
+    REG["Registros en cliente:<br/>Preset · Exporter · Operation"]
+  end
+
+  subgraph API["API — Route Handlers /api/**"]
+    AUTH["auth: jose JWT + argon2<br/>guards requireUser / requireOwnedProject"]
+    VALID["http/validate: Zod strict<br/>+ RFC 7807"]
+    CURSOR["http/cursor: (createdAt,id)"]
+    RATE["rate-limit (ventana deslizante)"]
+    QUOTA["cuotas por configuración"]
+    AUDIT["AuditEvent (trazabilidad)"]
+  end
+
+  subgraph DATOS["Infraestructura (adaptadores)"]
+    PRISMA["Prisma ORM"]
+    DB[("SQLite (sandbox)<br/>PostgreSQL 16 (prod)")]
+    STORE["StorageAdapter<br/>Local FS (sandbox) · S3/MinIO/R2 (prod)"]
+  end
+
+  UI --> STAGE
+  UI -->|" jobs tipados "| W1 & W2 & W3
+  REG -.->|" esquemas "| W1 & W3
+  UI -->|" REST + JSON · Bearer · cursor "| AUTH
+  AUTH --> VALID --> CURSOR
+  VALID --> QUOTA
+  QUOTA --> AUDIT
+  RATE -.-> AUTH
+  AUTH --> PRISMA --> DB
+  AUTH --> STORE
