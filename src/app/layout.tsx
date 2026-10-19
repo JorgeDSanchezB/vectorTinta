@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { Toaster } from "@/components/ui/toaster";
+import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,10 +14,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VectorTinta — Especificación (Iteración 1: planificación)",
+  title: "VectorTinta — Estudio de vectorización para serigrafía",
   description:
-    "Plan maestro de VectorTinta: vectorización WASM en cliente, eliminación de fondo ONNX, capas por color plano y exportación serigráfica. Fases 1–5 + Fase 6 preparada.",
-  keywords: ["serigrafía", "vectorización", "SVG", "Web Workers", "WASM", "plan maestro", "especificación"],
+    "Vectoriza en el navegador, quita el fondo, recolorea por tinta y exporta tus fotolitos separados con manifiesto serigráfico. Sin instalar nada.",
+  keywords: ["serigrafía", "vectorización", "SVG", "Web Workers", "tintas", "separación de color"],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
@@ -34,7 +34,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
         {children}
-        <Toaster />
+        <Toaster position="bottom-right" richColors closeButton />
       </body>
     </html>
   );

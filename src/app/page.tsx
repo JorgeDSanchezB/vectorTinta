@@ -1,10 +1,13 @@
-import { SpecApp } from "@/components/spec/SpecApp";
+import { StudioShell } from "@/components/studio/StudioShell";
 
 /**
- * Única ruta visible del entorno (restricción documentada en ADR-000).
- * Iteración 1 = solo planificación: esta página ES el visor de la especificación
- * VectorTinta, no el producto. Documento canónico: docs/PLAN-MAESTRO.md.
+ * VectorTinta — Ruta única visible del entorno (restricción del sandbox).
+ *
+ * Iteración 2 (Fase 6): la ruta "/" ES el producto — el estudio de
+ * vectorización y preparación de tintas. La especificación de la Iteración 1
+ * sigue accesible como overlay desde el pie ("Especificación"), sin añadir
+ * rutas nuevas.
  */
 export default function Page() {
-  return <SpecApp />;
+  return <StudioShell />;
 }

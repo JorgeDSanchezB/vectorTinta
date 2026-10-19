@@ -1,7 +1,7 @@
 # VectorTinta — Plan Maestro de Producto y Arquitectura
 
-**Versión:** 1.0 · **Iteración:** 1 (SOLO PLANIFICACIÓN)
-**Estado:** Fases 1–5 completadas y verificadas estáticamente. Fase 6 **preparada** (estructura, firmas y comandos) pero **NO implementada**, tal y como exige el enunciado de esta iteración.
+**Versión:** 1.0 · **Iteración:** 1 (SOLO PLANIFICACIÓN) — **Iteración 2 (Fase 6) IMPLEMENTADA**: ver «Estado»
+**Estado (Iteración 2):** la Fase 6 está **implementada y verificada en runtime** (navegador real, flujo dorado completo). El espacio de trabajo es la ruta `/`; la especificación sigue accesible como overlay («Especificación» en el pie). Las desviaciones conscientes sobre los contratos canónicos de §3.3 están documentadas una a una en `docs/decisions/ADR-012-deltas-implementacion.md`; el acceso de invitado en `ADR-011`.
 **Idioma:** castellano. **Convención de fechas:** ISO-8601, zona horaria del taller (configurable).
 
 ---
@@ -23,7 +23,7 @@ El procesamiento pesado (vectorización WASM, eliminación de fondo ONNX, empaqu
 | 3 | Contratos API | ✅ Completada |
 | 4 | Lógica de inserción extensible | ✅ Completada |
 | 5 | Renderizado dinámico y listas | ✅ Completada |
-| 6 | Código fuente | 🔒 Preparada (sin implementar, por acuerdo) |
+| 6 | Código fuente | ✅ Implementada (Iteración 2) y verificada en navegador |
 | — | Informe del Árbitro | Se anexa al final de la iteración con datos reales de la pasada adversarial |
 
 ---

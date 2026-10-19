@@ -1,8 +1,6 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// VectorTinta — Esquema Prisma (copia EXACTA del plan §2.3, líneas 198-311).
+// Dialecto SQLite (prod: provider = "postgresql" — ADR-005: mismo esquema, sustitución de adaptador).
+// Los campos "enum" son String validados por Zod en el borde HTTP (SQLite no tiene enums nativos).
 
 generator client {
   provider = "prisma-client-js"
@@ -10,23 +8,115 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
+  url      = env("DATABASE_URL") // prod: provider = "postgresql"
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  plan         String   @default("free") // Zod enum en el borde: 'free' | 'pro'
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  projects      Project[]
+  refreshTokens RefreshToken[]
+  auditEvents   AuditEvent[]
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, expiresAt])
+}
+
+model Project {
+  id           String   @id @default(uuid())
+  ownerId      String
+  name         String
+  description  String?
+  thumbnailKey String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  owner        User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  assets       Asset[]
+  exports      Export[]
+  auditEvents  AuditEvent[]
+  @@index([ownerId, createdAt, id]) // índice del cursor de listado
+}
+
+model Asset {
+  id         String   @id @default(uuid())
+  projectId  String
+  role       String   // Zod: 'source' | 'result' | 'thumbnail'
+  mimeType   String
+  width      Int
+  height     Int
+  bytes      Int
+  storageKey String   @unique
+  checksum   String
+  createdAt  DateTime @default(now())
+  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  vectorizations Vectorization[]
+  @@index([projectId, createdAt, id])
+}
+
+model Vectorization {
+  id                  String   @id @default(uuid())
+  assetId             String
+  engineId            String // p. ej. 'vtracer-wasm' | 'imagetracer'
+  presetId            String // p. ej. 'baja' | 'media' | 'alta' | 'comic' (futuro)
+  params              Json // validado contra PresetRegistry.get(presetId).schema
+  paramsSchemaVersion Int
+  svgStorageKey       String
+  nodeCount           Int
+  createdAt           DateTime @default(now())
+  asset   Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  layers  Layer[]
+  @@index([assetId, createdAt, id])
+}
+
+model Layer {
+  id              String       @id @default(uuid())
+  vectorizationId String
+  orden           Int
+  colorHex        String
+  name            String
+  svgFragmentKey  String
+  areaPx          Int
+  visible         Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  vectorization Vectorization @relation(fields: [vectorizationId], references: [id], onDelete: Cascade)
+  @@unique([vectorizationId, orden]) // invariante: orden único por vectorización
+  @@index([vectorizationId])
+}
+
+model Export {
+  id                    String   @id @default(uuid())
+  projectId             String
+  formatId              String // ExporterRegistry: 'zip-serigrafia' | 'png-mockup' | 'pdf-capas' (futuro)
+  storageKey            String
+  manifest              Json // validado contra ExporterRegistry.get(formatId).schema
+  manifestSchemaVersion Int
+  createdAt             DateTime @default(now())
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  @@index([projectId, createdAt, id]) // índice del cursor de exportaciones
+}
+
+model AuditEvent {
+  id        String   @id @default(uuid())
+  userId    String?
+  projectId String?
+  action    String // tipado por unión literal de Zod en el borde
+  metadata  Json
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  project    Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt, id])
+  @@index([projectId, createdAt, id])
 }

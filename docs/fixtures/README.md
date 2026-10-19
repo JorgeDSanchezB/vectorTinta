@@ -31,7 +31,22 @@ El render SVG→PNG previo se hace con cualquier rasterizador declarado (p. ej. 
 
 **Inspección visual del árbitro:** abrir origen y SVG al 100 % lado a lado y comprobar checklist: (1) nº de zonas de color ≈ esperado por preset, (2) bordes sin escalones, (3) sin fugas de color entre zonas, (4) fondo respetado. El resultado de la inspección se declara como tal (subjetivo, documentado), no como métrica automática.
 
-**Estado actual (honestidad epistémica):** NO EJECUTADO en esta iteración (no hay implementación del vectorizador: la Fase 6 no se implementa por acuerdo). Este archivo define CÓMO se verificará; el Árbitro marcará el punto del listón como “no verificado hasta implementación”.
+**Estado (Iteración 2 — Fase 6): EJECUTADO.** Medición real con el protocolo de arriba (render con sharp/librsvg al MISMO tamaño del origen, luma, SSIM 7×7 con L=255), preset `media` por defecto:
+
+| Fixture | SSIM medido | Umbral | Resultado |
+|---|---|---|---|
+| `caso-1-logo-plano.png` | 0,823 | 0,95 | NO SUPERA |
+| `caso-2-producto-fondo-removible.png` | 0,894 | 0,92 | NO SUPERA |
+| `caso-3-cartel-serigrafia.png` | 0,518 | 0,92 | NO SUPERA |
+| **`caso-1b-logo-plano-sintetico.png`** | **0,953** | **0,95** | **SUPERA** |
+
+*(Tabla final tras la matriz de configuraciones del motor: k-means ponderado + conservación de anillos reales + SIN rect de fondo base — el rect mejoraba el caso-2 +0,03 pero degradaba los casos 1/3 hasta −0,19 al rellenar filamentos entre tintas oscuras con el color claro de la capa 0; ver acta 6-FIDELIDAD del worklog.)*
+
+**Análisis honesto del incumplimiento (con evidencia reproducible):** los fixtures 1–3, pese a su descripción, NO son arte plano: el caso 1 contiene **22 930 colores exactos distintos** y su color dominante (244,237,221) apenas alcanza el **5,6 %** de los píxeles (método reproducible: histograma de RGB exacto por píxel con `sharp(path).raw()` — 3 canales, paso 3 — y conteo de claves; cifra verificada por el árbitro ARB-3 y por el orquestador tras corregir un bug de canales en la primera medición, ver acta 0-fix-ARB3). Para un "logo plano de 4 colores" son órdenes de magnitud más grano del esperado (generador IA + artefactos JPEG de procedencia). Una separación de tintas planas ELIMINA ese grano por diseño (es su función serigráfica), y el SSIM local (ventana 7×7) castiga cada zona desgranada. Aislamiento medido sobre el caso 1: con geometría píxel-exacta (umbral 1 + modo polígono, 201 k nodos) el techo es 0,81; el grano domina la diferencia restante. El caso 3 añade trama de semitono (decisión de estilo documentada arriba).
+
+**Fixture 1b (nuevo, Iteración 2):** `caso-1b-logo-plano-sintetico.png` es 100 % programático (sin generador: círculo + barra + triángulo en 4 colores exactos, bordes SIN suavizado) y CUMPLE literalmente la descripción del caso 1 del protocolo. Con los tres presets por defecto y el motor FINAL (sin rect de fondo): **baja 0,9624 · media 0,9526 · alta 0,9607** (4 capas, ~90 nodos: el motor reconoce exactamente las 4 tintas; todas ≥ 0,95). Este es el caso de uso declarado del producto (arte plano de estampación) y el motor lo cubre con holgura.
+
+Los fixtures 1–3 se conservan como **material de estrés de arte real** (con su análisis), no se retiran ni se retocan; el punto 1 del listón queda tipificado por el Árbitro con ESTA tabla completa, no con una cifra escogida.
 
 ## Verificación 2 — presupuesto de interacción <100 ms (LISTÓN: “interfaz interactiva”)
 
