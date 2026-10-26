@@ -61,7 +61,7 @@ El procesamiento pesado (vectorización WASM, eliminación de fondo ONNX, empaqu
 
 ### 1.3 Supuestos (numerados; si se rompen, se reabre el plan)
 
-- **S-01** Imágenes de entrada ≤ 4096×4096 px y ≤ 15 MiB (valores por defecto **configurables**, ver `app.config.ts`). El 95 % de artes para serigrafía cabe holgado.
+- **S-01** Imágenes de entrada ≤ 4096×4096 px y ≤ 25 MiB (valores por defecto **configurables**, ver `app.config.ts`; revisado en ADR-013: lo que excede se ADAPTA automáticamente en el navegador — escala + recodificación — en lugar de rechazarse). El 95 % de artes para serigrafía cabe holgado.
 - **S-02** Navegadores de escritorio actuales con WASM, Web Workers y `OffscreenCanvas` (Chromium/WebKit/Firefox de los últimos 24 meses).
 - **S-03** La edición de calidad es experiencia de escritorio; móvil = consulta + avisos.
 - **S-04** Un proyecto = un arte final; máximo 30 capas por vectorización y 20 proyectos por usuario gratuito (configurables).
@@ -491,8 +491,8 @@ El ZIP se ensambla en el Worker del cliente (fflate); se sube por `StorageGatewa
 
 // 413 — payload mayor que el límite configurado, detectado en Content-Length ANTES de leer el cuerpo
 { "type": "…/problems/payload-grande", "title": "Imagen demasiado grande", "status": 413,
-  "detail": "El archivo supera 15 MiB.", "instance": "/api/projects/p-1/assets",
-  "errors": [{ "code": "max_upload_bytes", "limitBytes": 15728640 }] }
+  "detail": "El archivo supera 25 MiB.", "instance": "/api/projects/p-1/assets",
+  "errors": [{ "code": "max_upload_bytes", "limitBytes": 26214400 }] }
 
 // 429 — rate limit con Retry-After (cabecera HTTP)
 { "type": "…/problems/demasiadas-peticiones", "title": "Límite de peticiones", "status": 429,

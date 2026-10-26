@@ -192,7 +192,7 @@ const ERRORS_EXAMPLE = `// 401 — token de acceso caducado/inválido
 
 // 413 — detectado en Content-Length ANTES de leer el cuerpo
 { "type": "…/problems/payload-grande", "title": "Imagen demasiado grande", "status": 413,
-  "detail": "El archivo supera 15 MiB.", "errors": [{ "code": "max_upload_bytes", "limitBytes": 15728640 }] }
+  "detail": "El archivo supera ${Math.round(appConfig.limits.image.maxUploadBytes / 1048576)} MiB.", "errors": [{ "code": "max_upload_bytes", "limitBytes": ${appConfig.limits.image.maxUploadBytes} }] }
 
 // 429 — con cabecera HTTP Retry-After
 { "type": "…/problems/demasiadas-peticiones", "title": "Límite de peticiones", "status": 429,

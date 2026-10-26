@@ -17,14 +17,13 @@ import { ApiProblem } from "@/lib/domain/errors";
 import type { Problem } from "@/lib/domain/errors";
 import type { AssetDto, LayerDto, ProjectDto, ProjectListItemDto, VectorizationDto, VectorParams, RawImageData } from "@/lib/domain/entities";
 import { isAllowedImageMime, withinMaxDimension, withinMaxUploadBytes } from "@/lib/domain/invariants";
+import { fitImageToUploadLimits, formatBytes } from "@/lib/image/fit-to-limits";
 import { toast } from "sonner";
 import type { BgRemovalOptions } from "@/lib/domain/worker-protocol";
 import { JobCancelled, runBgRemovalJob, runVectorizeJob } from "@/lib/state/slices/worker-hosts";
 import type { ClientLayer, HistoryCommand, SourceImageState } from "@/lib/state/types";
 import type { Store } from "@/lib/state/store";
 import { claseDeError, writeDraft } from "@/lib/state/slices/auth";
-
-const L = appConfig.limits;
 
 export type PanelStatus = "empty" | "loading" | "ready" | "error" | "partial";
 
@@ -320,24 +319,48 @@ export const createProjectSlice: StateCreator<Store, [], [], ProjectSlice> = (se
       toast.error(`Formato no permitido. Usa: ${appConfig.limits.image.allowedMimeTypes.join(", ")}`);
       return;
     }
-    if (!withinMaxUploadBytes(blob.size)) {
-      toast.error(`El archivo supera ${Math.round(L.image.maxUploadBytes / 1048576)} MiB (límite de configuración).`);
-      return;
-    }
     set({ sourceStatus: "loading", sourceProblem: null });
     try {
       const decoded = await decodeImageFile(blob);
-      if (!withinMaxDimension(decoded.width, decoded.height)) {
-        set({ sourceStatus: "error" });
-        toast.error(`Dimensiones ${decoded.width}×${decoded.height} superan el máximo ${L.image.maxDimension}px por lado.`);
-        return;
+
+      // ADR-013: lo que excede los límites se ADAPTA en el navegador (escala +
+      // recodificación) en lugar de rechazarse; el servidor revalida el resultado.
+      const needsFit =
+        !withinMaxUploadBytes(blob.size) || !withinMaxDimension(decoded.width, decoded.height);
+
+      let payload = new File([blob], fileName, { type: mimeType });
+      let bitmap = decoded.bitmap;
+      let imageData = decoded.imageData;
+      let width = decoded.width;
+      let height = decoded.height;
+
+      if (needsFit) {
+        const fitted = await fitImageToUploadLimits({
+          blob,
+          fileName,
+          bitmap: decoded.bitmap,
+          hasAlpha: scanAlpha(decoded.imageData),
+        });
+        // Re-decodificar el archivo adaptado: el estado local (imageData que
+        // vectoriza el Worker) debe ser EXACTAMENTE el que quedó guardado.
+        const redecoded = await decodeImageFile(fitted.file);
+        payload = fitted.file;
+        bitmap = redecoded.bitmap;
+        imageData = redecoded.imageData;
+        width = redecoded.width;
+        height = redecoded.height;
+        toast.info("Imagen adaptada automáticamente", {
+          description: `${decoded.width}×${decoded.height} · ${formatBytes(blob.size)} → ${width}×${height} · ${formatBytes(payload.size)} (${payload.type})`,
+        });
       }
-      const checksum = await sha256Hex(await blob.arrayBuffer());
+
+      // El checksum corresponde SIEMPRE a los bytes que se envían (adaptados o no).
+      const checksum = await sha256Hex(await payload.arrayBuffer());
       const asset = await api.assets.upload(project.id, {
-        file: new File([blob], fileName, { type: mimeType }),
+        file: payload,
         role: "source",
-        width: decoded.width,
-        height: decoded.height,
+        width,
+        height,
         checksum,
       });
       set({
@@ -345,23 +368,23 @@ export const createProjectSlice: StateCreator<Store, [], [], ProjectSlice> = (se
         source: {
           assetId: asset.id,
           mimeType: asset.mimeType,
-          width: decoded.width,
-          height: decoded.height,
+          width,
+          height,
           bytes: asset.bytes,
           checksum: asset.checksum,
-          bitmap: decoded.bitmap,
-          imageData: decoded.imageData,
+          bitmap,
+          imageData,
           bgApplied: false,
         },
         sourceStatus: "ready",
-        hasAlpha: scanAlpha(decoded.imageData),
+        hasAlpha: scanAlpha(imageData),
       });
-      toast.success("Imagen fuente lista", { description: `${decoded.width}×${decoded.height} · ${Math.round(blob.size / 1024)} KiB` });
+      toast.success("Imagen fuente lista", { description: `${width}×${height} · ${formatBytes(payload.size)}` });
     } catch (e) {
       const problem = e instanceof ApiProblem ? e.problem : null;
       set({ sourceStatus: "error", sourceProblem: problem });
       get().pushDiagnostic({ clase: claseDeError(e), title: "La subida falló", detail: problem?.detail, action: "Reintentar" });
-      toast.error("No se pudo subir la imagen", { description: problem?.detail });
+      toast.error("No se pudo subir la imagen", { description: problem?.detail ?? (e instanceof Error ? e.message : undefined) });
     }
   },
 

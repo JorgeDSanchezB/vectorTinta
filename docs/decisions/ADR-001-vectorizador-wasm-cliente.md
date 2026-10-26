@@ -4,7 +4,7 @@
 
 ## Contexto (problema)
 
-Vectorizar en servidor implica: subir imágenes de hasta 15 MiB (latencia), pagar cómputo por conversión y tratar con la imagen del cliente (privacidad, RGPD). El enunciado obliga a preferir el cliente. Además existe un **riesgo legal real**: las licencias de los motores conocidos son dispares (vtracer original es de licencia restrictiva; potrace es GPL; imagetracer.js es de dominio público/Unlicense).
+Vectorizar en servidor implica: subir imágenes de hasta 25 MiB (latencia; ver ADR-013: el cliente adapta lo que excede), pagar cómputo por conversión y tratar con la imagen del cliente (privacidad, RGPD). El enunciado obliga a preferir el cliente. Además existe un **riesgo legal real**: las licencias de los motores conocidos son dispares (vtracer original es de licencia restrictiva; potrace es GPL; imagetracer.js es de dominio público/Unlicense).
 
 ## Decisión
 

@@ -121,6 +121,9 @@ export function AssetPanel() {
                 {appConfig.limits.image.allowedMimeTypes.join(" · ")} · máx {Math.round(appConfig.limits.image.maxUploadBytes / 1048576)} MiB ·{" "}
                 {appConfig.limits.image.maxDimension}px por lado
               </p>
+              <p className="text-[10px] text-muted-foreground">
+                Si tu imagen supera los límites, se adapta automáticamente en tu navegador (escala + recodificación) antes de subir.
+              </p>
               <input
                 ref={inputRef}
                 type="file"

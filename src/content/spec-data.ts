@@ -174,6 +174,9 @@ export const adrs: AdrSummary[] = [
   { id: "ADR-008", title: "Registros con esquemas vs switch", gist: "Preset/Exporter/Operation/SelectionRegistry construidos desde manifiestos de configuración; coste estrictamente acotado.", file: "ADR-008-registros-vs-switch.md" },
   { id: "ADR-009", title: "Bg-removal ONNX en cliente", gist: "Sin subir la imagen; dos adaptadores (imgly pendiente de licencia, U²-Net Apache-2.0); máscara reversible por diseño.", file: "ADR-009-bg-removal-onnx-cliente.md" },
   { id: "ADR-010", title: "Cursor compuesto (createdAt,id)", gist: "Orden estable bajo concurrencia; índices compuestos por listado; OFFSET descartado.", file: "ADR-010-paginacion-cursor-compuesto.md" },
+  { id: "ADR-011", title: "Acceso de taller invitado", gist: "POST /api/auth/guest con usuario desechable y cuotas normales; evaluar sin fricción de registro.", file: "ADR-011-acceso-invitado.md" },
+  { id: "ADR-012", title: "Deltas de implementación vs contratos", gist: "Desviaciones conscientes de la Iteración 2 frente al plan §3.3, con motivo y alternativa descartada.", file: "ADR-012-deltas-implementacion.md" },
+  { id: "ADR-013", title: "Subidas que exceden: adaptar, no rechazar", gist: "Techo 25 MiB en config + adaptación automática en navegador (escala + recodificación, alfa-safe); el servidor sigue revalidando todo.", file: "ADR-013-adaptacion-subidas.md" },
 ];
 
 export const risks: { n: string; riesgo: string; prob: string; impacto: string; mitigacion: string }[] = [

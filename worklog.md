@@ -316,3 +316,24 @@ Work Log:
 
 Stage Summary:
 - Las 3 salvedades del árbitro ARB-3 están resueltas. Veredicto final ARB-3: **ITERACIÓN 2 — FASE 6: APROBADA** (rechazos R-1/R-2 corregidos, ambos de documentación, sin impacto en código). Cierre de la iteración.
+
+---
+Task ID: FIX-1
+Agent: orquestador (Z.ai Code, modelo principal)
+Task: Corregir rechazo de subida "imagen demasiado grande" (reporte del usuario)
+
+Work Log:
+- Diagnóstico: el límite era `limits.image.maxUploadBytes = 15_728_640` (15 MiB) + `maxDimension = 4096` en app.config.ts (única fuente de verdad); el cliente rechazaba con toast ANTES de subir y el servidor mantenía 413 como guardián. La foto del usuario excedía el tope.
+- ADR-013 (docs/decisions/ADR-013-adaptacion-subidas.md): decisión de ADAPTAR en el navegador en lugar de rechazar + techo subido a 25 MiB.
+- app.config.ts: maxUploadBytes 15 MiB → 25 MiB (26_214_400). Sin constantes nuevas: todo lo demás (guardas del servidor, checks del cliente, textos de UI, visor de spec) deriva de config.
+- NUEVO src/lib/image/fit-to-limits.ts: fitImageToUploadLimits() — escala al máximo por lado (proporción preservada) + escalera de recodificación calidad/dimensión (JPEG/WebP; con alfa solo WebP/PNG, JPEG prohibido por destruir alfa; si solo sobran dimensiones, PNG sin pérdida primero; suelo 256 px; valida el MIME REAL del blob de salida porque toBlob puede ignorar el pedido) + formatBytes() para toasts honestos.
+- project.ts uploadSource(): el rechazo duro (bytes y dimensiones) se sustituye por adaptación; checksum y dimensiones declaradas corresponden al archivo FINAL enviado (el que el servidor revalida con sharp); tras adaptar se RE-DECODIFICA el archivo para que source.imageData (el que vectoriza el Worker) sea exactamente el persistido; toast.info con valores exactos original → final.
+- AssetPanel.tsx: nota en la zona de subida "se adapta automáticamente en tu navegador".
+- SpecApp.tsx: el ejemplo del 413 ahora se interpola desde appConfig (deja de ser un valor muerto copiado).
+- Docs: PLAN-MAESTRO S-01 y ejemplo 413 actualizados a 25 MiB; ADR-001 actualizado; ADR-013 registrado; spec-data.ts lista ahora ADR-011/012/013 (011/012 faltaban).
+- Verificación: bun run lint limpio; dev server recompila sin errores; E2E con agent-browser (guest → crear proyecto → subir 6000×4000 32.0 MiB ruido JPEG): toast "Imagen adaptada automáticamente 6000×4000 · 32.0 MiB → 4096×2731 · 7.8 MiB (image/jpeg)" + POST /assets 201; regresión con PNG 1024×1024 1.2 MiB: sin adaptación, 201 como PNG; cero errores de consola/página; screenshots desktop+mobile tomados.
+
+Stage Summary:
+- Las subidas que exceden límites ya no se rechazan: se adaptan en cliente (escala + recodificación, alfa-safe) y el servidor sigue revalidando TODO (Content-Length, bytes, MIME, dimensiones sharp, sha-256) sobre el archivo adaptado.
+- Techo de subida: 25 MiB por config (antes 15). Dimensiones: 4096 px por lado (sin cambio).
+- E2E verificado en navegador real: ambos caminos (oversized 32 MiB → adaptado y aceptado; normal → intacto).

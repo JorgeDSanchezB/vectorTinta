@@ -177,7 +177,7 @@ export const appConfig: AppConfig = AppConfigSchema.parse({
   limits: {
     image: {
       allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
-      maxUploadBytes: 15_728_640, // 15 MiB — supuesto S-01 del plan
+      maxUploadBytes: 26_214_400, // 25 MiB — S-01 (revisado: antes 15 MiB; el cliente adapta automáticamente lo que exceda)
       maxDimension: 4096,
       maxPixels: 4096 * 4096,
     },
