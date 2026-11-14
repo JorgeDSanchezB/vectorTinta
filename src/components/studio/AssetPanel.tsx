@@ -73,14 +73,17 @@ export function AssetPanel() {
     void uploadSource(file, file.name, file.type);
   };
 
+  // FIX-2: shrink-0 — la columna lateral scrollea; la card conserva su altura
+  // natural. Con min-h-0 se encogía y su contenido (metadatos) desbordaba
+  // visualmente sobre la card "Quitar fondo".
   return (
-    <Card className="vt-panel flex min-h-0 flex-col border-border/80">
+    <Card className="vt-panel flex shrink-0 flex-col border-border/80">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold">
           <Upload className="h-4 w-4" aria-hidden /> Imagen fuente
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+      <CardContent className="flex flex-col gap-3">
         {small && (
           <p role="note" className="rounded-md border border-amber-300 bg-amber-100 px-2 py-1.5 text-[11px] text-amber-900">
             Pantalla pequeña: las operaciones pesadas (vectorizar, quitar fondo, exportar) quedan bloqueadas por presupuesto de rendimiento (configuración móvil).
@@ -152,7 +155,10 @@ export function AssetPanel() {
               <div className="vt-checker overflow-hidden rounded-md border border-border">
                 <canvas ref={canvasRef} className="block h-auto w-full" aria-label="Vista de la imagen fuente" style={{ maxHeight: 260 }} />
               </div>
-              <dl className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[11px] text-muted-foreground">
+              {/* FIX-2b: una columna (label izq · valor der). Con grid-cols-2 el
+                  valor "1636×2752" desbordaba su celda e invadía la columna
+                  vecina ("Peso") — colisión de texto real medida en E2E. */}
+              <dl className="grid grid-cols-1 gap-y-1 font-mono text-[11px] text-muted-foreground">
                 <div className="flex justify-between gap-2"><dt>Dimensiones</dt><dd className="tabular-nums">{source.width}×{source.height}</dd></div>
                 <div className="flex justify-between gap-2"><dt>Peso</dt><dd className="tabular-nums">{(source.bytes / 1024).toFixed(0)} KiB</dd></div>
                 <div className="flex justify-between gap-2"><dt>MIME</dt><dd>{source.mimeType}</dd></div>

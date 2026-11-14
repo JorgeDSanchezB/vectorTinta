@@ -57,22 +57,24 @@ export function InspectorPanel() {
 
   const vectorReady = source !== null && !vectorizeBusy && !small;
 
+  // FIX-2: shrink-0 — columna derecha scrollea; la card conserva altura
+  // natural (con min-h-0 se encogía y el contenido desbordaba/superponía).
   return (
-    <Card className="vt-panel flex min-h-0 flex-col border-border/80">
+    <Card className="vt-panel flex shrink-0 flex-col border-border/80">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold">
           <Cpu className="h-4 w-4" aria-hidden /> Inspector
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col">
-        <Tabs defaultValue="vector" className="flex min-h-0 flex-1 flex-col">
+      <CardContent className="flex flex-col">
+        <Tabs defaultValue="vector" className="flex flex-col">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="vector">Vectorizar</TabsTrigger>
             <TabsTrigger value="export">Exportar</TabsTrigger>
           </TabsList>
 
           {/* ─────────── Tab Vectorizar ─────────── */}
-          <TabsContent value="vector" className="mt-3 flex min-h-0 flex-1 flex-col gap-3">
+          <TabsContent value="vector" className="mt-3 flex flex-col gap-3">
             {small && (
               <p role="note" className="rounded-md border border-amber-300 bg-amber-100 px-2 py-1.5 text-[11px] text-amber-900">
                 Vectorizar queda bloqueado en pantallas pequeñas (presupuesto móvil de configuración).
@@ -201,7 +203,7 @@ export function InspectorPanel() {
           </TabsContent>
 
           {/* ─────────── Tab Exportar ─────────── */}
-          <TabsContent value="export" className="mt-3 flex min-h-0 flex-1 flex-col gap-2">
+          <TabsContent value="export" className="mt-3 flex flex-col gap-2">
             <div className="space-y-1.5">
               {appConfig.export.formats.map((fmt) => {
                 const entry = exporterRegistry.get(fmt.id);

@@ -62,8 +62,10 @@ export function LayerPanel() {
 
   const totalPx = source !== null ? source.width * source.height : 0;
 
+  // FIX-2: shrink-0 — misma corrección que AssetPanel (la columna scrollea,
+  // la card no se encoge: el contenido desbordaba sobre la card vecina).
   return (
-    <Card className="vt-panel flex min-h-0 flex-col border-border/80">
+    <Card className="vt-panel flex shrink-0 flex-col border-border/80">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between text-sm font-semibold">
           <span className="flex items-center gap-2">
@@ -74,7 +76,7 @@ export function LayerPanel() {
           </span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col">
+      <CardContent className="flex flex-col">
         <PanelStates
           ariaLabel="Capas"
           status={status}
@@ -155,7 +157,7 @@ function LayerRow({
       animate={{ opacity: layer.visible ? 1 : 0.55 }}
       transition={{ duration: DUR.base, ease: EASE.signature }}
       className={cn(
-        "group flex items-center gap-1.5 rounded-md border px-1.5 py-1.5 transition-colors",
+        "group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-x-1.5 rounded-md border px-1.5 py-1.5 transition-colors",
         selected ? "border-accent bg-accent/15" : "border-border/70 bg-card hover:border-foreground/25 hover:bg-secondary/40",
         isDragging && "z-10 shadow-md",
       )}
@@ -164,7 +166,7 @@ function LayerRow({
     >
       <button
         type="button"
-        className="vt-hit cursor-grab touch-none rounded p-1.5 text-muted-foreground/70 hover:text-foreground disabled:cursor-not-allowed"
+        className="vt-hit cursor-grab touch-none rounded p-1 text-muted-foreground/70 hover:text-foreground disabled:cursor-not-allowed"
         aria-label={`Arrastrar para reordenar la capa ${layer.name}`}
         disabled={dragDisabled}
         {...attributes}
@@ -187,7 +189,7 @@ function LayerRow({
               animate={{ scale: 1, rotate: 0 }}
               transition={SPRING.pop}
             >
-              <ColorSwatch hex={validHex ? layer.colorHex : appConfig.rendering.fallbackColorHex} size={24} />
+              <ColorSwatch hex={validHex ? layer.colorHex : appConfig.rendering.fallbackColorHex} size={20} />
             </motion.span>
           </button>
         </PopoverTrigger>
@@ -245,22 +247,20 @@ function LayerRow({
         </PopoverContent>
       </Popover>
 
-      <div className="min-w-0 flex-1">
-        <Input
-          value={nameDraft}
-          onChange={(e) => setNameDraft(e.target.value)}
-          onBlur={() => {
-            if (nameDraft !== layer.name && nameDraft.trim() !== "") onRename(layer.id, nameDraft.trim());
-          }}
-          aria-label={`Nombre de la capa ${layer.orden}`}
-          className="h-6 border-transparent bg-transparent px-1 text-xs font-medium hover:border-input focus-visible:bg-card"
-        />
-        <div className="flex items-center gap-2 px-1 font-mono text-[10px] text-muted-foreground">
-          <span className="tabular-nums">{layer.orden.toString().padStart(2, "0")}</span>
-          <span className="tabular-nums">{Math.round(coverage * 10) / 10} %</span>
-          <span className="tabular-nums">{layer.areaPx.toLocaleString("es")} px²</span>
-        </div>
-      </div>
+      {/* FIX-2c: grid de 2 filas — nombre con elipsis y la línea de
+          estadísticas ocupando el ANCHO COMPLETO de la fila (antes vivía
+          atrapada en la columna central de ~100px: "789.093 px²" se truncaba
+          perdiendo la unidad). Tooltip con los valores exactos. */}
+      <Input
+        value={nameDraft}
+        onChange={(e) => setNameDraft(e.target.value)}
+        onBlur={() => {
+          if (nameDraft !== layer.name && nameDraft.trim() !== "") onRename(layer.id, nameDraft.trim());
+        }}
+        aria-label={`Nombre de la capa ${layer.orden}`}
+        title={nameDraft}
+        className="h-6 min-w-0 truncate border-transparent bg-transparent px-1 text-xs font-medium hover:border-input focus-visible:bg-card"
+      />
 
       <div className="flex items-center opacity-80 transition-opacity group-hover:opacity-100">
         <Button
@@ -301,6 +301,15 @@ function LayerRow({
         >
           <CopyPlus className="h-3.5 w-3.5" aria-hidden />
         </Button>
+      </div>
+
+      <div
+        className="col-span-4 mt-0.5 flex items-center gap-1.5 px-0.5 font-mono text-[10px] text-muted-foreground"
+        title={`Orden ${layer.orden.toString().padStart(2, "0")} · ${Math.round(coverage * 10) / 10} % · ${layer.areaPx.toLocaleString("es")} px²`}
+      >
+        <span className="shrink-0 tabular-nums">{layer.orden.toString().padStart(2, "0")}</span>
+        <span className="shrink-0 tabular-nums">{Math.round(coverage * 10) / 10} %</span>
+        <span className="min-w-0 truncate tabular-nums">{layer.areaPx.toLocaleString("es")} px²</span>
       </div>
     </motion.li>
   );
