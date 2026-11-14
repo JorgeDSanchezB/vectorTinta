@@ -16,6 +16,7 @@
  */
 import * as React from "react";
 import { Crosshair, Maximize2, Minus, Plus } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { appConfig } from "@/lib/config/app.config";
 import { isValidColorHex } from "@/lib/domain/invariants";
@@ -23,6 +24,7 @@ import { fragmentInner } from "@/lib/state/slices/project";
 import { useStudio } from "@/lib/state/store";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/studio/molecules";
+import { SPRING, REVEAL, PULSE_MS } from "@/lib/motion";
 import { Image as ImageIcon } from "lucide-react";
 
 /**
@@ -67,6 +69,11 @@ export function VectorStage() {
   const selectLayer = useStudio((s) => s.selectLayer);
   const isolateLayer = useStudio((s) => s.isolateLayer);
   const view = useStudio((s) => s.view);
+  const reduced = useReducedMotion();
+  const reducedMotionRef = React.useRef(reduced);
+  React.useEffect(() => {
+    reducedMotionRef.current = reduced;
+  }, [reduced]);
 
   const width = source?.width ?? 1024;
   const height = source?.height ?? 1024;
@@ -78,6 +85,31 @@ export function VectorStage() {
     if (el === null) groupRefs.current.delete(id);
     else groupRefs.current.set(id, el);
   }, []);
+
+  /* ── Momento firma: revelado escalonado de capas al terminar una vectorización.
+     Mutación DIRECTA del DOM (Web Animations API): cero re-render de React y el
+     LayerGroup memoizado queda intacto. Se apaga con prefers-reduced-motion. */
+  const prevCountRef = React.useRef(0);
+
+  React.useEffect(() => {
+    // El contador SIEMPRE avanza, incluso si el SVG aún no existe (ARB2-3:
+    // al cambiar de proyecto el 0→N del siguiente se detectaba tarde).
+    const prev = prevCountRef.current;
+    prevCountRef.current = layers.length;
+    const svg = svgRef.current;
+    if (svg === null) return;
+    const grew = layers.length > prev && prev === 0 && layers.length > 0;
+    if (!grew || reducedMotionRef.current) return;
+    const sorted = [...layers].sort((a, b) => a.orden - b.orden);
+    sorted.forEach((layer, i) => {
+      const g = groupRefs.current.get(layer.id);
+      if (g === undefined) return;
+      g.animate(
+        [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0px)" }],
+        { duration: REVEAL.durMs, delay: REVEAL.baseDelayMs + i * REVEAL.staggerMs, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "backwards" },
+      );
+    });
+  }, [layers]);
 
   /* ── Sincronización imperativa: color, visibilidad, orden, selección ── */
   const appliedSel = (id: string): boolean | undefined => groupRefs.current.get(id)?.getAttribute("data-selected") === "true";
@@ -210,6 +242,10 @@ export function VectorStage() {
     const g = target?.closest?.("g[data-layer-id]") as SVGGElement | null;
     if (g !== null) {
       const id = g.getAttribute("data-layer-id");
+      // Pulso de selección (mutación directa, ARB-1 "golpe barato #4").
+      if (!reducedMotionRef.current) {
+        g.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: PULSE_MS, easing: "ease-out" });
+      }
       selectLayer(id);
       if (isolatedLayerId !== null && id !== isolatedLayerId) isolateLayer(null);
     } else {
@@ -280,24 +316,30 @@ export function VectorStage() {
         </div>
       )}
 
-      {/* Barra de herramientas del lienzo */}
-      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-card/95 px-2 py-1 shadow-md backdrop-blur">
-        <Button size="icon" className="size-7" variant="ghost" aria-label="Alejar" onClick={() => setZoom(zoom / 1.25)}>
+      {/* Barra de herramientas del lienzo (entra con spring, glass) */}
+      <motion.div
+        initial={reduced ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={SPRING.tool}
+        className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-card/95 px-2 py-1 shadow-md backdrop-blur"
+      >
+        <Button size="icon" className="vt-hit size-7" variant="ghost" aria-label="Alejar" onClick={() => setZoom(zoom / 1.25)}>
           <Minus className="h-4 w-4" aria-hidden />
         </Button>
+        {/* Readout sin remontaje (ARB1-9): sin key ni animación por tick de rueda. */}
         <span className="w-14 text-center font-mono text-[11px] tabular-nums text-muted-foreground">{Math.round(zoom * 100)} %</span>
-        <Button size="icon" className="size-7" variant="ghost" aria-label="Acercar" onClick={() => setZoom(zoom * 1.25)}>
+        <Button size="icon" className="vt-hit size-7" variant="ghost" aria-label="Acercar" onClick={() => setZoom(zoom * 1.25)}>
           <Plus className="h-4 w-4" aria-hidden />
         </Button>
-        <Button size="icon" className="size-7" variant="ghost" aria-label="Ajustar a la ventana" onClick={fit}>
+        <Button size="icon" className="vt-hit size-7" variant="ghost" aria-label="Ajustar a la ventana" onClick={fit}>
           <Maximize2 className="h-4 w-4" aria-hidden />
         </Button>
         {isolatedLayerId !== null && (
-          <Button size="icon" className="size-7 text-accent" variant="ghost" aria-label="Salir del aislamiento" onClick={() => isolateLayer(null)}>
+          <Button size="icon" className="vt-hit size-7 text-accent" variant="ghost" aria-label="Salir del aislamiento" onClick={() => isolateLayer(null)}>
             <Crosshair className="h-4 w-4" aria-hidden />
           </Button>
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }

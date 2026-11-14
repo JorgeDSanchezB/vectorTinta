@@ -337,3 +337,26 @@ Stage Summary:
 - Las subidas que exceden límites ya no se rechazan: se adaptan en cliente (escala + recodificación, alfa-safe) y el servidor sigue revalidando TODO (Content-Length, bytes, MIME, dimensiones sharp, sha-256) sobre el archivo adaptado.
 - Techo de subida: 25 MiB por config (antes 15). Dimensiones: 4096 px por lado (sin cambio).
 - E2E verificado en navegador real: ambos caminos (oversized 32 MiB → adaptado y aceptado; normal → intacto).
+
+---
+Task ID: UI-V2
+Agent: orquestador (Z.ai Code, modelo principal) + árbitro adversarial independiente (ARB-1/2/3)
+Task: AGENTS.md + mejora visual "design v2 Taller Vivo" con motion, en loop planificar→construir→probar→revisar→corregir→repetir, auditada por árbitro adversarial hasta APROBADO.
+
+Work Log:
+- AGENTS.md creado en raíz (stack, comandos, reglas de arquitectura, motion obligatorio, protocolo de verificación LISTÓN, prohibiciones).
+- PLAN v2: identidad papel/tinta/cooper mantenida; sistema de motion centralizado; momentos firma (boot, auth, revelado de capas, pulso de selección).
+- BUILD: src/lib/motion.ts NUEVO (DUR/EASE/SPRING.pop|pill|bar|tool/REVEAL/PULSE_MS/riseIn/stagger/popStart|popEnd/floatLoop/inkPulse/TAP); globals.css (+vt-mesh, vt-halftone-dense, vt-grain feTurbulence, vt-panel, vt-hit, vt-shimmer, vt-underline + reduced-motion); AuthGate rediseñada (malla+halftone+grano, escalonado, tintas que levitan); StudioShell (BootScreen con pulso de tinta, header con píldora layoutId spring, badge pop, stagger de paneles, footer con vt-underline); molecules (PanelStates loading/error-shake/empty-levitación, ProgressLine con cierre "completado", QuotaMeter scaleX, ColorSwatch pop, OkChip pop); AssetPanel (dropzone dragOver scale+glow); LayerPanel (entradas opacity, pop de color al recolorear, tintes de selección /15); VectorStage (toolbar spring tool, MOMENTO FIRMA: revelado escalonado de capas por WAAPI sobre los <g> — cero re-render React, LayerGroup memo intacto — y pulso de selección 180ms); InspectorPanel (format cards hover/chip "elegido" pop, params riseIn); InkPrepView (filas motion.tr escalonadas, barras de cobertura scaleX compositor-only con color de tinta); ProjectsDrawer (QuotaMeter conectado, vt-hit en eliminar).
+- TEST por ronda: lint limpio, tsc --noEmit limpio, agent-browser E2E (guest→proyecto→subir→vectorizar→capas→Tintas→drag→exportar), screenshots 1440×900 y 390×844, consola/errores limpios.
+- ARB-1 (subagente adversarial independiente): APROBADO CON CORRECCIONES — 14 hallazgos (6 MAYORES): código muerto ×5, BootScreen sin guard reduced, motion.tr sin estilos TableRow, targets <44px, barras width+initial=false (no animaban), chip azul sky, 14 números mágicos, vt-lift en paneles grandes, readout zoom remontaba, tintes selección invisibles, doble foco, closure authProblem, nits boot/separador/100%, doble drop-shadow. Flujo dorado verificado por el árbitro con su propio fixture.
+- FIX: aplicados los 14 (borrados muertos, conectado QuotaMeter, guard reduced, TableRow restore, vt-hit extensor de targets, scaleX, tokens, vt-panel sombra-solo, readout plano, tintes /15, foco nativo, getState fresco, cierre 100%, drop-shadow único) + 2 golpes Awwwards (revelado escalonado WAAPI + pulso de selección + grano de papel).
+- ARB-2: APROBADO CON CORRECCIONES MENORES — 12/14 verificados; nuevos: ARB2-1 QuotaMeter dentro de <p> de Radix (DOM inválido, error consola), ARB2-2 lienzo 1465px bajo el pliegue (preexistente), ARB2-3 puerta del revelado tras cambio de proyecto. El árbitro validó las 2 omisiones Awwwards (marching ants, ink-spill) como no bloqueantes.
+- FIX: ARB2-1 (QuotaMeter a div propio en SheetHeader), ARB2-3 (contador antes del guard), grip 44px, tokens REVEAL/PULSE_MS + borrado DUR.reveal, comentario firma wobble, ARB2-2 real = lg:h-screen lg:overflow-hidden en root (min-h-screen permitía crecer) + scroll interno en columna derecha. DURANTE ESTA RONDA: crash de cliente detectado y corregido (SPRING sin importar en InspectorPanel = ReferenceError; popIn.hidden como initial = error TS) → popStart/popEnd tipados TargetAndTransition.
+- ARB-3: APROBADO — 5/5 condiciones verificadas con evidencia (canvas 787px en vh 900, toolbar y footer dentro del primer viewport, docScrollH=900, 0 <p> con <div>, quota viva "2/20", drag/pulso/revelado instrumentados por el árbitro). 2 NITs aplicados: typo lg:grid-rows corregido byte a byte + desviación de tabs (37px, WCAG AA) documentada en comentario junto al TabsList.
+
+Stage Summary:
+- Design v2 "Taller Vivo" APROBADO por el árbitro adversarial en 3 rondas (14+3+2 hallazgos, todos resueltos o documentados).
+- Motion: 100% por tokens en src/lib/motion.ts; prefers-reduced-motion respetado en TODA animación incl. píldora y BootScreen; compositor-only (transform/opacity/scaleX) verificado.
+- Layout desktop: shell de altura fija — lienzo, toolbar y footer SIEMPRE dentro del primer viewport (medido: canvas 787px/900vh).
+- Accesibilidad: targets ≥44px vía .vt-hit (excepción documentada: tabs 37px), foco nativo shadcn, ARIA intacto.
+- Verificado: tsc+lint limpios, flujo dorado completo ×3 (equipo + árbitro ×2), consola limpia en navegación fresca, 0.00% azul fuera del sistema en auditoría de píxeles, móvil sin overflow horizontal.

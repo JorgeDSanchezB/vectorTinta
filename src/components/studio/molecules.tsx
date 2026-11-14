@@ -4,17 +4,20 @@
  * VectorTinta — Moléculas compartidas del estudio (plan §1.6: átomos→moléculas).
  *
  * PanelStates implementa los CINCO estados obligatorios por panel (§5.5):
- * carga (skeleton), vacío (CTA), error (Reintentar), parcial (chip) y listo.
- * Los toasts son resultado de acciones; NUNCA enmascaran un panel vacío.
+ * carga (skeleton con shimmer), vacío (CTA con levitación), error (shake-in,
+ * Reintentar), parcial (chip) y listo. Los toasts son resultado de acciones;
+ * NUNCA enmascaran un panel vacío. Motion centralizado en src/lib/motion.ts.
  */
 import * as React from "react";
-import { AlertTriangle, CheckCircle2, Clock3, FileQuestion, Loader2, WandSparkles } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileQuestion, Loader2, WandSparkles } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { PanelStatus } from "@/lib/state/slices/project";
+import { DUR, EASE, SPRING, floatLoop, popEnd, popStart } from "@/lib/motion";
 
 /* ───────────────────────── ColorSwatch ───────────────────────── */
 
@@ -30,10 +33,12 @@ export function ColorSwatch({
   title?: string;
 }) {
   return (
-    <span
+    <motion.span
       role="img"
       aria-label={title ?? `Color ${hex}`}
       title={title ?? hex}
+      whileHover={{ scale: 1.18 }}
+      transition={SPRING.pop}
       className={cn("inline-block rounded-[4px] border border-black/25 shadow-sm", className)}
       style={{ width: size, height: size, backgroundColor: hex }}
     />
@@ -51,7 +56,7 @@ const CLASE_CHIP: Record<string, { label: string; className: string }> = {
   configuracion: { label: "Config", className: "bg-orange-100 text-orange-900 border-orange-300" },
   interno: { label: "Crítico", className: "bg-red-100 text-red-900 border-red-300" },
   red: { label: "Red", className: "bg-stone-200 text-stone-800 border-stone-400" },
-  local: { label: "Local", className: "bg-sky-100 text-sky-900 border-sky-300" },
+  local: { label: "Local", className: "bg-secondary text-secondary-foreground border-border" },
   listado: { label: "Listado", className: "bg-stone-200 text-stone-800 border-stone-400" },
 };
 
@@ -85,18 +90,32 @@ export function PanelStates({
   children: React.ReactNode;
   ariaLabel?: string;
 }) {
+  const reduced = useReducedMotion();
   if (status === "loading") {
     return (
-      <div className="space-y-2 p-4" aria-busy="true" aria-label={ariaLabel}>
+      <motion.div
+        className="space-y-2 p-4"
+        aria-busy="true"
+        aria-label={ariaLabel}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: DUR.fast }}
+      >
         {Array.from({ length: skeletonRows }).map((_, i) => (
-          <Skeleton key={i} className="h-10 w-full" />
+          <Skeleton key={i} className="vt-shimmer h-10 w-full" style={{ animationDelay: `${i * 0.15}s` }} />
         ))}
-      </div>
+      </motion.div>
     );
   }
   if (status === "error") {
     return (
-      <div role="alert" className="flex flex-col items-center gap-2 p-6 text-center">
+      <motion.div
+        role="alert"
+        className="flex flex-col items-center gap-2 p-6 text-center"
+        initial={reduced ? { opacity: 0 } : { opacity: 0, x: 0 }}
+        animate={reduced ? { opacity: 1 } : { opacity: 1, x: [0, -7, 6, -3, 0] }}
+        transition={{ duration: DUR.slow, ease: EASE.inOut }}
+      >
         <AlertTriangle className="h-8 w-8 text-destructive" aria-hidden />
         <p className="text-sm font-medium">{error ?? "Algo falló al cargar este panel."}</p>
         {onRetry !== undefined && (
@@ -104,16 +123,27 @@ export function PanelStates({
             <Loader2 className="mr-1 h-3.5 w-3.5" aria-hidden /> Reintentar
           </Button>
         )}
-      </div>
+      </motion.div>
     );
   }
   if (status === "empty") {
     return (
-      <div className="vt-halftone flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border/80 p-6 text-center">
-        <FileQuestion className="h-8 w-8 text-muted-foreground" aria-hidden />
+      <motion.div
+        className="vt-halftone flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border/80 p-6 text-center"
+        initial={{ opacity: 0, y: reduced ? 0 : 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: DUR.base, ease: EASE.signature }}
+      >
+        <motion.span
+          className="inline-flex text-muted-foreground"
+          animate={reduced ? undefined : { y: [0, -5, 0] }}
+          transition={reduced ? undefined : floatLoop}
+        >
+          <FileQuestion className="h-8 w-8" aria-hidden />
+        </motion.span>
         {empty}
         {emptyHint !== undefined && <p className="max-w-[42ch] text-xs text-muted-foreground">{emptyHint}</p>}
-      </div>
+      </motion.div>
     );
   }
   return (
@@ -133,27 +163,49 @@ export function PanelStates({
 /* ───────────────────────── ProgressLine ───────────────────────── */
 
 export function ProgressLine({ percent, phase, className }: { percent: number; phase?: string; className?: string }) {
-  if (percent <= 0 || percent >= 100) return null;
+  if (percent <= 0) return null;
+  if (percent >= 100) {
+    // Cierre honesto del proceso (ARB1-13c): el 100 % se anuncia y queda.
+    return (
+      <motion.div initial={popStart} animate={popEnd} className={className}>
+        <OkChip>completado</OkChip>
+      </motion.div>
+    );
+  }
   return (
-    <div className={cn("space-y-1", className)} aria-live="polite">
+    <motion.div
+      className={cn("space-y-1", className)}
+      aria-live="polite"
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: DUR.fast }}
+    >
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
         <span className="capitalize">{phase !== undefined && phase !== "" ? phase : "procesando"}…</span>
         <span className="tabular-nums">{Math.round(percent)} %</span>
       </div>
       <Progress value={percent} className="h-1.5" />
-    </div>
+    </motion.div>
   );
 }
 
 /* ───────────────────────── QuotaMeter ───────────────────────── */
 
 export function QuotaMeter({ used, max, label }: { used: number; max: number; label?: string }) {
-  const pct = Math.min(100, Math.round((used / Math.max(1, max)) * 100));
+  const ratio = Math.min(1, Math.max(0, used / Math.max(1, max)));
+  const pct = Math.round(ratio * 100);
   const tone = pct >= 100 ? "bg-destructive" : pct >= 80 ? "bg-amber-500" : "bg-primary";
   return (
     <div className="flex items-center gap-2 text-[11px] text-muted-foreground" title={`${used} de ${max}`}>
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full transition-all", tone)} style={{ width: `${pct}%` }} />
+        {/* scaleX (compositor-only, ARB1-5); el track mide 64px fijos. */}
+        <motion.div
+          className={cn("h-full w-full rounded-full", tone)}
+          style={{ transformOrigin: "left" }}
+          initial={{ scaleX: 0 }}
+          animate={{ scaleX: ratio }}
+          transition={SPRING.bar}
+        />
       </div>
       <span className="tabular-nums">{used}/{max}{label !== undefined ? ` · ${label}` : ""}</span>
     </div>
@@ -173,9 +225,16 @@ export function EmptyState({
   hint?: string;
   action?: React.ReactNode;
 }) {
+  const reduced = useReducedMotion();
   return (
     <div className="flex flex-col items-center gap-2 text-center">
-      <Icon className="h-7 w-7 text-muted-foreground" aria-hidden />
+      <motion.span
+        className="inline-flex text-muted-foreground"
+        animate={reduced ? undefined : { y: [0, -6, 0] }}
+        transition={reduced ? undefined : floatLoop}
+      >
+        <Icon className="h-7 w-7" aria-hidden />
+      </motion.span>
       <p className="text-sm font-medium">{title}</p>
       {hint !== undefined && <p className="max-w-[40ch] text-xs text-muted-foreground">{hint}</p>}
       {action}
@@ -187,16 +246,12 @@ export function EmptyState({
 
 export function OkChip({ children }: { children: React.ReactNode }) {
   return (
-    <Badge variant="outline" className="border-emerald-300 bg-emerald-100 text-emerald-900">
-      <CheckCircle2 className="mr-1 h-3 w-3" aria-hidden /> {children}
-    </Badge>
-  );
-}
-
-export function PendingChip({ children }: { children: React.ReactNode }) {
-  return (
-    <Badge variant="outline" className="border-stone-300 bg-stone-100 text-stone-700">
-      <Clock3 className="mr-1 h-3 w-3" aria-hidden /> {children}
-    </Badge>
+    <motion.span
+      initial={popStart}
+      animate={popEnd}
+      className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-900"
+    >
+      <CheckCircle2 className="h-3 w-3" aria-hidden /> {children}
+    </motion.span>
   );
 }

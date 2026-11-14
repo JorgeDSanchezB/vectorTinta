@@ -12,6 +12,7 @@
  */
 import * as React from "react";
 import { Eraser, Info, ShieldAlert, Upload } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -24,6 +25,7 @@ import { useStudio } from "@/lib/state/store";
 import { OkChip, PanelStates, ProgressLine } from "@/components/studio/molecules";
 import { useSmallViewport } from "@/components/studio/hooks";
 import { toast } from "sonner";
+import { DUR, EASE } from "@/lib/motion";
 
 const BG_OPS = listOperations().filter((op) => op.id.startsWith("bg-"));
 
@@ -41,6 +43,7 @@ export function AssetPanel() {
   const openProject = useStudio((s) => s.openProject);
 
   const small = useSmallViewport();
+  const reduced = useReducedMotion();
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = React.useState(false);
   const [opId, setOpId] = React.useState("bg-chroma-edge");
@@ -71,7 +74,7 @@ export function AssetPanel() {
   };
 
   return (
-    <Card className="flex min-h-0 flex-col border-border/80">
+    <Card className="vt-panel flex min-h-0 flex-col border-border/80">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold">
           <Upload className="h-4 w-4" aria-hidden /> Imagen fuente
@@ -93,7 +96,7 @@ export function AssetPanel() {
           skeletonRows={2}
         >
           {project !== null && sourceStatus === "empty" ? (
-            <div
+            <motion.div
               role="button"
               tabIndex={0}
               aria-label="Subir imagen fuente"
@@ -111,11 +114,20 @@ export function AssetPanel() {
                 setDragOver(false);
                 takeFile(e.dataTransfer.files[0]);
               }}
-              className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
-                dragOver ? "border-accent bg-accent/10" : "border-border hover:border-foreground/40 hover:bg-accent/5"
+              initial={{ opacity: 0, scale: reduced ? 1 : 0.985 }}
+              animate={{ opacity: 1, scale: dragOver && !reduced ? 1.015 : 1 }}
+              transition={{ duration: DUR.base, ease: EASE.signature }}
+              className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 text-center transition-all duration-300 ${
+                dragOver ? "border-accent bg-accent/10 shadow-[inset_0_0_18px_-6px_rgba(191,25,50,0.25)]" : "border-border hover:border-foreground/40 hover:bg-accent/5"
               }`}
             >
-              <Upload className="h-7 w-7 text-muted-foreground" aria-hidden />
+              <motion.span
+                className="inline-flex text-muted-foreground"
+                animate={reduced ? undefined : dragOver ? { y: 0, scale: 1.15 } : { y: [0, -4, 0], scale: 1 }}
+                transition={reduced ? undefined : { duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
+              >
+                <Upload className="h-7 w-7" aria-hidden />
+              </motion.span>
               <p className="text-sm font-medium">Arrastra tu arte aquí o haz clic</p>
               <p className="text-[11px] text-muted-foreground">
                 {appConfig.limits.image.allowedMimeTypes.join(" · ")} · máx {Math.round(appConfig.limits.image.maxUploadBytes / 1048576)} MiB ·{" "}
@@ -134,7 +146,7 @@ export function AssetPanel() {
                   e.target.value = "";
                 }}
               />
-            </div>
+            </motion.div>
           ) : source !== null ? (
             <div className="space-y-3">
               <div className="vt-checker overflow-hidden rounded-md border border-border">

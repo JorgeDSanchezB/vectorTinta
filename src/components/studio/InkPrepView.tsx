@@ -12,6 +12,7 @@
  */
 import * as React from "react";
 import { Droplets, ListOrdered } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -22,7 +23,9 @@ import { relativeLightness } from "@/lib/domain/invariants";
 import { renderFilePattern, renderInkMark } from "@/lib/registries/formats/manifests";
 import type { ClientLayer } from "@/lib/state/types";
 import { useStudio } from "@/lib/state/store";
+import { cn } from "@/lib/utils";
 import { ColorSwatch, EmptyState, PanelStates } from "@/components/studio/molecules";
+import { DUR, EASE, SPRING } from "@/lib/motion";
 
 /** Celda de nombre: confirma al desenfocar o pulsar Enter (un commit, un comando). */
 function NameCell({ layer, onCommit }: { layer: ClientLayer; onCommit: (name: string) => void }) {
@@ -74,6 +77,7 @@ export function InkPrepView() {
   const renameLayer = useStudio((s) => s.renameLayer);
   const selectedLayerId = useStudio((s) => s.selectedLayerId);
   const selectLayer = useStudio((s) => s.selectLayer);
+  const reduced = useReducedMotion();
 
   const totalPx = source !== null ? source.width * source.height : 0;
   const strategy = appConfig.export.printOrderStrategy;
@@ -93,7 +97,7 @@ export function InkPrepView() {
   const status = layers.length === 0 ? "empty" : workspaceStatus;
 
   return (
-    <Card className="flex min-h-0 flex-1 flex-col border-border/80">
+    <Card className="vt-panel flex min-h-0 flex-1 flex-col border-border/80">
       <CardHeader className="pb-2">
         <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-sm font-semibold">
           <span className="flex items-center gap-2">
@@ -130,19 +134,33 @@ export function InkPrepView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {printOrder.map(({ layer, order }) => {
+                {printOrder.map(({ layer, order }, idx) => {
                   const coverage = totalPx > 0 ? (layer.areaPx / totalPx) * 100 : 0;
                   const selected = selectedLayerId === layer.id;
                   return (
-                    <TableRow
+                    <motion.tr
                       key={layer.id}
                       onClick={() => selectLayer(layer.id)}
-                      className={`cursor-pointer ${selected ? "bg-accent/10" : ""}`}
+                      className={cn(
+                        "cursor-pointer border-b border-border/50 transition-colors hover:bg-muted/50",
+                        selected && "bg-accent/15 hover:bg-accent/15",
+                      )}
                       aria-current={selected ? "true" : undefined}
+                      initial={reduced ? false : { opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: DUR.base, ease: EASE.signature, delay: reduced ? 0 : Math.min(idx * 0.05, 0.35) }}
                     >
                       <TableCell className="font-mono text-xs tabular-nums">{String(order).padStart(2, "0")}</TableCell>
                       <TableCell>
-                        <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px]">{renderInkMark(order, layer.colorHex)}</code>
+                        <motion.code
+                          key={layer.colorHex}
+                          initial={reduced ? false : { scale: 0.9, opacity: 0.6 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          transition={SPRING.pop}
+                          className="inline-block rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px]"
+                        >
+                          {renderInkMark(order, layer.colorHex)}
+                        </motion.code>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
@@ -154,7 +172,15 @@ export function InkPrepView() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
-                            <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, coverage)}%` }} />
+                            {/* scaleX sobre track fijo (ARB1-5: compositor-only y el spring
+                                SÍ ocurre en el mount; width no se anima jamás). */}
+                            <motion.div
+                              className="h-full w-full rounded-full"
+                              style={{ backgroundColor: layer.colorHex, transformOrigin: "left" }}
+                              initial={{ scaleX: 0 }}
+                              animate={{ scaleX: Math.min(1, Math.max(0, coverage / 100)) }}
+                              transition={SPRING.bar}
+                            />
                           </div>
                           <span className="font-mono text-[11px] tabular-nums">{Math.round(coverage * 100) / 100} %</span>
                         </div>
@@ -170,7 +196,7 @@ export function InkPrepView() {
                           aria-label={`Visibilidad de la tinta ${layer.name}`}
                         />
                       </TableCell>
-                    </TableRow>
+                    </motion.tr>
                   );
                 })}
                 {excluded.map((layer) => (

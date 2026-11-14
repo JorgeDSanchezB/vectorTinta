@@ -138,9 +138,10 @@
   background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
 }
 
-/* Capa seleccionada en el lienzo: silueta cooper, sin tocar la geometría. */
+/* Capa seleccionada en el lienzo: silueta cooper, sin tocar la geometría.
+   UN solo drop-shadow (ARB1-14: dos filtros repintaban en cada frame de pan/zoom). */
 g[data-selected="true"] > * {
-  filter: drop-shadow(0 0 2px rgba(191, 25, 50, 0.95)) drop-shadow(0 0 7px rgba(191, 25, 50, 0.55));
+  filter: drop-shadow(0 0 6px rgba(191, 25, 50, 0.65));
 }
 
 /* Cursor del lienzo. */
@@ -158,4 +159,100 @@ g[data-selected="true"] > * {
 .vt-halftone {
   background-image: radial-gradient(rgba(27, 27, 27, 0.07) 1px, transparent 1px);
   background-size: 14px 14px;
+}
+
+/* ───────── Sistema "Taller Vivo" (design v2) ───────── */
+
+/* Malla de tinta para la puerta de acceso: halftone + glow cooper orgánico. */
+.vt-mesh {
+  background:
+    radial-gradient(120% 90% at 15% 10%, rgba(191, 25, 50, 0.16) 0%, transparent 55%),
+    radial-gradient(100% 80% at 90% 85%, rgba(233, 184, 36, 0.14) 0%, transparent 50%),
+    radial-gradient(80% 70% at 70% 20%, rgba(27, 27, 27, 0.06) 0%, transparent 60%),
+    var(--background);
+}
+
+/* Halftone denso sobre el panel de marca (trama serigráfica real). */
+.vt-halftone-dense {
+  background-image: radial-gradient(rgba(244, 240, 230, 0.16) 1.2px, transparent 1.2px);
+  background-size: 10px 10px;
+}
+
+/* Grano de papel estático (feTurbulence renderizado una vez; cero JS, cero layout). */
+.vt-grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}
+
+/* Paneles del estudio: SOLO sombra al hover (ARB1-8: sin transform en tarjetas
+   de altura completa; el lift queda para elementos pequeños con motion). */
+.vt-panel {
+  transition: box-shadow 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.vt-panel:hover {
+  box-shadow: 0 12px 30px -20px rgba(27, 27, 27, 0.3);
+}
+
+/* Extensor de objetivo táctil (ARB1-4): un botón de 28-32px pasa a tocar ≥44px
+   sin cambiar su tamaño visual (pseudo-elemento invisible que captura el golpe). */
+.vt-hit {
+  position: relative;
+}
+.vt-hit::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: inherit;
+}
+
+/* Barra de progreso con shimmer de tinta (cobre → mostaza). */
+.vt-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.vt-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 253, 246, 0.55) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: vt-shimmer-slide 1.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@keyframes vt-shimmer-slide {
+  to { transform: translateX(100%); }
+}
+
+/* Subrayado animado de enlaces del pie. */
+.vt-underline {
+  position: relative;
+}
+.vt-underline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 1px;
+  width: 100%;
+  background: var(--ring);
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.vt-underline:hover::after {
+  transform: scaleX(1);
+  transform-origin: left;
+}
+
+/* Accesibilidad: TODA animación decorativa se apaga con reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .vt-shimmer::after {
+    animation: none;
+  }
+  .vt-panel,
+  .vt-panel:hover {
+    transition: none;
+  }
+  .vt-underline::after {
+    transition: none;
+  }
 }

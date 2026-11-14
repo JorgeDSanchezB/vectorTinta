@@ -32,6 +32,8 @@ import type { ClientLayer } from "@/lib/state/types";
 import { useStudio } from "@/lib/state/store";
 import { cn } from "@/lib/utils";
 import { ColorSwatch, EmptyState, PanelStates } from "@/components/studio/molecules";
+import { motion, useReducedMotion } from "framer-motion";
+import { DUR, EASE, SPRING } from "@/lib/motion";
 
 export function LayerPanel() {
   const layers = useStudio((s) => s.layers);
@@ -61,7 +63,7 @@ export function LayerPanel() {
   const totalPx = source !== null ? source.width * source.height : 0;
 
   return (
-    <Card className="flex min-h-0 flex-col border-border/80">
+    <Card className="vt-panel flex min-h-0 flex-col border-border/80">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between text-sm font-semibold">
           <span className="flex items-center gap-2">
@@ -141,17 +143,20 @@ function LayerRow({
   React.useEffect(() => setNameDraft(layer.name), [layer.name]);
   const [pickOpen, setPickOpen] = React.useState(false);
   const [hexDraft, setHexDraft] = React.useState("");
+  const reduced = useReducedMotion();
 
   const validHex = isValidColorHex(layer.colorHex);
 
   return (
-    <li
+    <motion.li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
+      initial={reduced ? false : { opacity: 0 }}
+      animate={{ opacity: layer.visible ? 1 : 0.55 }}
+      transition={{ duration: DUR.base, ease: EASE.signature }}
       className={cn(
         "group flex items-center gap-1.5 rounded-md border px-1.5 py-1.5 transition-colors",
-        selected ? "border-accent bg-accent/5" : "border-border/70 bg-card hover:border-foreground/25",
-        !layer.visible && "opacity-55",
+        selected ? "border-accent bg-accent/15" : "border-border/70 bg-card hover:border-foreground/25 hover:bg-secondary/40",
         isDragging && "z-10 shadow-md",
       )}
       onClick={() => onSelect(layer.id)}
@@ -159,7 +164,7 @@ function LayerRow({
     >
       <button
         type="button"
-        className="cursor-grab touch-none p-0.5 text-muted-foreground/70 hover:text-foreground disabled:cursor-not-allowed"
+        className="vt-hit cursor-grab touch-none rounded p-1.5 text-muted-foreground/70 hover:text-foreground disabled:cursor-not-allowed"
         aria-label={`Arrastrar para reordenar la capa ${layer.name}`}
         disabled={dragDisabled}
         {...attributes}
@@ -175,7 +180,15 @@ function LayerRow({
             aria-label={`Color de la capa: ${layer.colorHex}. Ábrelo para elegir tinta de la paleta`}
             className="rounded p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <ColorSwatch hex={validHex ? layer.colorHex : appConfig.rendering.fallbackColorHex} size={24} />
+            <motion.span
+              key={layer.colorHex}
+              className="inline-flex"
+              initial={reduced ? false : { scale: 0.45, rotate: -12 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={SPRING.pop}
+            >
+              <ColorSwatch hex={validHex ? layer.colorHex : appConfig.rendering.fallbackColorHex} size={24} />
+            </motion.span>
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-56 p-2" aria-label="Paleta de tintas del taller">
@@ -252,7 +265,7 @@ function LayerRow({
       <div className="flex items-center opacity-80 transition-opacity group-hover:opacity-100">
         <Button
           size="icon"
-          className="size-7"
+          className="vt-hit size-7"
           variant={isolated ? "default" : "ghost"}
           aria-label={isolated ? `Salir del aislamiento de ${layer.name}` : `Aislar solo la capa ${layer.name}`}
           aria-pressed={isolated}
@@ -265,7 +278,7 @@ function LayerRow({
         </Button>
         <Button
           size="icon"
-          className="size-7"
+          className="vt-hit size-7"
           variant="ghost"
           aria-label={layer.visible ? `Ocultar ${layer.name}` : `Mostrar ${layer.name}`}
           onClick={(e) => {
@@ -277,7 +290,7 @@ function LayerRow({
         </Button>
         <Button
           size="icon"
-          className="size-7"
+          className="vt-hit size-7"
           variant="ghost"
           aria-label={`Duplicar ${layer.name} como nueva tinta`}
           disabled={layer.orden >= appConfig.limits.layers.maxPerVectorization - 1}
@@ -289,6 +302,6 @@ function LayerRow({
           <CopyPlus className="h-3.5 w-3.5" aria-hidden />
         </Button>
       </div>
-    </li>
+    </motion.li>
   );
 }

@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { appConfig } from "@/lib/config/app.config";
 import type { ProjectListItemDto } from "@/lib/domain/entities";
 import { useStudio } from "@/lib/state/store";
-import { PanelStates } from "@/components/studio/molecules";
+import { PanelStates, QuotaMeter } from "@/components/studio/molecules";
 import { format } from "date-fns";
 
 interface RowProps {
@@ -66,7 +66,7 @@ function ProjectRow({ index, style, projects, currentId, onOpen, onAskDelete }: 
         <Button
           size="icon"
           variant="ghost"
-          className="size-7 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+          className="vt-hit size-7 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
           aria-label={`Eliminar el proyecto ${p.name}`}
           onClick={(e) => {
             e.stopPropagation();
@@ -124,9 +124,12 @@ export function ProjectsDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
       <SheetContent side="left" className="flex w-[340px] flex-col gap-0 p-0 sm:w-[380px]">
         <SheetHeader className="border-b border-border/70 p-4">
           <SheetTitle className="font-mono text-base">Proyectos</SheetTitle>
-          <SheetDescription>
-            Cuota del plan gratuito: {appConfig.limits.projects.maxPerUserFree} proyectos.
-          </SheetDescription>
+          <SheetDescription>Tu taller, paginado por cursor.</SheetDescription>
+          {/* Cuota viva (ARB1-1) FUERA de SheetDescription (ARB2-1: Radix la emite
+              como <p> y un <div> anidado es DOM inválido + riesgo de hydration). */}
+          <div className="pt-1">
+            <QuotaMeter used={projects.length} max={appConfig.limits.projects.maxPerUserFree} label="plan gratuito" />
+          </div>
         </SheetHeader>
 
         <div className="border-b border-border/70 p-3">

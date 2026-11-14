@@ -10,6 +10,7 @@
  */
 import * as React from "react";
 import { Cpu, Download, PackageOpen, WandSparkles } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ import { useStudio } from "@/lib/state/store";
 import { OkChip, PanelStates, ProgressLine } from "@/components/studio/molecules";
 import { ExportDialog } from "@/components/studio/ExportDialog";
 import { useSmallViewport } from "@/components/studio/hooks";
+import { DUR, EASE, riseIn, SPRING, TAP } from "@/lib/motion";
 
 const PRESETS = appConfig.vectorization.presetManifest;
 
@@ -46,6 +48,7 @@ export function InspectorPanel() {
   const [exportFormat, setExportFormat] = React.useState<"zip-serigrafia" | "png-mockup">("zip-serigrafia");
 
   const fields = presetFields(presetId);
+  const reduced = useReducedMotion();
 
   const selectPreset = (id: string): void => {
     setPresetId(id);
@@ -55,7 +58,7 @@ export function InspectorPanel() {
   const vectorReady = source !== null && !vectorizeBusy && !small;
 
   return (
-    <Card className="flex min-h-0 flex-col border-border/80">
+    <Card className="vt-panel flex min-h-0 flex-col border-border/80">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold">
           <Cpu className="h-4 w-4" aria-hidden /> Inspector
@@ -93,7 +96,14 @@ export function InspectorPanel() {
             </div>
 
             {/* Formulario AUTOGENERADO desde el registro (§4.4) */}
-            <div className="space-y-2.5 rounded-md border border-border/70 bg-secondary/30 p-2.5" aria-label="Parámetros del preset (autogenerados del registro)">
+            <motion.div
+              variants={riseIn}
+              initial="hidden"
+              animate="show"
+              key={presetId}
+              className="space-y-2.5 rounded-md border border-border/70 bg-secondary/30 p-2.5"
+              aria-label="Parámetros del preset (autogenerados del registro)"
+            >
               {fields.map((field) => {
                 const value = (params as unknown as Record<string, unknown>)[field.key];
                 if (field.kind === "enum") {
@@ -151,7 +161,7 @@ export function InspectorPanel() {
                   </div>
                 );
               })}
-            </div>
+            </motion.div>
 
             <div className="space-y-1.5">
               <Label htmlFor="engine" className="text-[11px]">Motor</Label>
@@ -169,9 +179,11 @@ export function InspectorPanel() {
               </Select>
             </div>
 
-            <Button className="w-full" disabled={!vectorReady} onClick={() => void runVectorization(presetId, params, engineId)}>
-              <WandSparkles className="mr-1 h-4 w-4" aria-hidden /> Vectorizar en el navegador
-            </Button>
+            <motion.div whileTap={reduced ? undefined : TAP}>
+              <Button className="w-full" disabled={!vectorReady} onClick={() => void runVectorization(presetId, params, engineId)}>
+                <WandSparkles className="mr-1 h-4 w-4" aria-hidden /> Vectorizar en el navegador
+              </Button>
+            </motion.div>
             <ProgressLine percent={vectorizePercent} phase={vectorizePhase} />
             {vectorization !== null && !vectorizeBusy && (
               <div className="flex flex-wrap gap-1.5">
@@ -195,25 +207,39 @@ export function InspectorPanel() {
                 const entry = exporterRegistry.get(fmt.id);
                 const active = exportFormat === fmt.id;
                 return (
-                  <button
+                  <motion.button
                     key={fmt.id}
                     type="button"
                     aria-pressed={active}
                     onClick={() => setExportFormat(fmt.id as "zip-serigrafia" | "png-mockup")}
+                    whileHover={reduced ? undefined : { y: -1.5 }}
+                    whileTap={reduced ? undefined : TAP}
+                    transition={{ duration: DUR.fast, ease: EASE.signature }}
                     className={`w-full rounded-md border p-2 text-left transition-colors ${active ? "border-accent bg-accent/5" : "border-border/70 hover:border-foreground/25"}`}
                   >
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <PackageOpen className="h-3.5 w-3.5" aria-hidden /> {fmt.label}
-                      {active && <span className="ml-auto font-mono text-[10px] text-accent">elegido</span>}
+                      {active && (
+                        <motion.span
+                          initial={reduced ? false : { opacity: 0, scale: 0.7 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={SPRING.pop}
+                          className="ml-auto font-mono text-[10px] text-accent"
+                        >
+                          elegido
+                        </motion.span>
+                      )}
                     </span>
                     <span className="block text-[10px] text-muted-foreground">{entry?.description ?? fmt.description}</span>
-                  </button>
+                  </motion.button>
                 );
               })}
             </div>
-            <Button className="w-full" disabled={vectorization === null || small} onClick={() => setExportOpen(true)}>
-              <Download className="mr-1 h-4 w-4" aria-hidden /> Preparar exportación
-            </Button>
+            <motion.div whileTap={reduced ? undefined : TAP}>
+              <Button className="w-full" disabled={vectorization === null || small} onClick={() => setExportOpen(true)}>
+                <Download className="mr-1 h-4 w-4" aria-hidden /> Preparar exportación
+              </Button>
+            </motion.div>
             <p className="text-[10px] leading-snug text-muted-foreground">
               Cuota de configuración: {appConfig.limits.exports.maxPerDay} exportaciones/día. El ZIP lleva un SVG por tinta + {appConfig.export.manifestFileName} con orden de impresión, marcas y coberturas.
             </p>

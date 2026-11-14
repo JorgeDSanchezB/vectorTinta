@@ -15,7 +15,7 @@ import * as React from "react";
 import {
   Droplets, FileText, FolderOpen, LogOut, Redo2, ScrollText, Stethoscope, Undo2,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { appConfig, configDigest } from "@/lib/config/app.config";
+import { cn } from "@/lib/utils";
 import { useStudio } from "@/lib/state/store";
 import { AuthGate } from "@/components/studio/AuthGate";
 import { AssetPanel } from "@/components/studio/AssetPanel";
@@ -33,6 +34,7 @@ import { InkPrepView } from "@/components/studio/InkPrepView";
 import { ProjectsDrawer } from "@/components/studio/ProjectsDrawer";
 import { CriticalModal, DiagnosticsTray } from "@/components/studio/DiagnosticsTray";
 import { SpecApp } from "@/components/spec/SpecApp";
+import { DUR, EASE, riseIn, stagger, inkPulse, SPRING, TAP } from "@/lib/motion";
 
 export function StudioShell() {
   const boot = useStudio((s) => s.boot);
@@ -58,18 +60,42 @@ export function StudioShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  if (authStatus === "boot") {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background">
-        <Droplets className="h-8 w-8 animate-pulse" aria-hidden />
-        <p className="font-mono text-sm text-muted-foreground">Preparando el estudio…</p>
-      </div>
-    );
-  }
+  if (authStatus === "boot") return <BootScreen />;
 
   if (authStatus === "anon") return <AuthGate />;
 
   return <Workspace />;
+}
+
+/** Pantalla de arranque: tinta que pulsa + halftone + grano (momento de marca). */
+function BootScreen() {
+  const reduced = useReducedMotion();
+  return (
+    <div className="vt-mesh relative flex min-h-screen flex-col items-center justify-center gap-4 overflow-hidden">
+      <div aria-hidden className="vt-grain pointer-events-none absolute inset-0 opacity-[0.05]" />
+      <div aria-hidden className="vt-halftone pointer-events-none absolute inset-0 opacity-50" />
+      <motion.div
+        variants={inkPulse}
+        initial="hidden"
+        animate={reduced ? undefined : "show"}
+        className="relative inline-flex text-primary"
+      >
+        <Droplets className="h-10 w-10" aria-hidden />
+      </motion.div>
+      <motion.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.15, duration: DUR.base }}
+        className="relative font-mono text-sm text-muted-foreground"
+      >
+        Preparando el estudio…
+      </motion.p>
+      {/* barra de carga fina bajo el texto (CSS puro, se apaga con reduced motion) */}
+      <div aria-hidden className="relative h-0.5 w-40 overflow-hidden rounded-full bg-muted">
+        {!reduced && <div className="vt-shimmer h-full w-full rounded-full bg-primary/70" />}
+      </div>
+    </div>
+  );
 }
 
 function Workspace() {
@@ -85,6 +111,7 @@ function Workspace() {
   const historyBusy = useStudio((s) => s.historyBusy);
   const diagnosticsCount = useStudio((s) => s.diagnostics.length);
   const logout = useStudio((s) => s.logout);
+  const reduced = useReducedMotion();
 
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [diagOpen, setDiagOpen] = React.useState(false);
@@ -93,16 +120,23 @@ function Workspace() {
   React.useEffect(() => setNameDraft(project?.name ?? ""), [project?.id, project?.name]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
+    <div className="flex min-h-screen flex-col bg-background text-foreground lg:h-screen lg:overflow-hidden">
       {/* ── Cabecera ── */}
-      <header className="sticky top-0 z-30 flex min-h-14 items-center gap-2 border-b border-border bg-card/95 px-3 py-2 backdrop-blur">
+      <motion.header
+        initial={{ opacity: 0, y: reduced ? 0 : -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: DUR.base, ease: EASE.signature }}
+        className="sticky top-0 z-30 flex min-h-14 items-center gap-2 border-b border-border bg-card/95 px-3 py-2 backdrop-blur"
+      >
         <TooltipProvider delayDuration={400}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="sm" variant="outline" aria-label="Abrir proyectos" onClick={() => setDrawerOpen(true)}>
-                <FolderOpen className="h-4 w-4" aria-hidden />
-                <span className="hidden sm:inline">Proyectos</span>
-              </Button>
+              <motion.div whileTap={reduced ? undefined : TAP}>
+                <Button size="sm" variant="outline" aria-label="Abrir proyectos" onClick={() => setDrawerOpen(true)}>
+                  <FolderOpen className="h-4 w-4" aria-hidden />
+                  <span className="hidden sm:inline">Proyectos</span>
+                </Button>
+              </motion.div>
             </TooltipTrigger>
             <TooltipContent>Listado paginado por cursor · {appConfig.limits.projects.maxPerUserFree} proyectos (plan gratuito)</TooltipContent>
           </Tooltip>
@@ -122,72 +156,118 @@ function Workspace() {
           />
         </div>
 
+        {/* Conmutador de vista con píldora deslizante (layoutId, spring).
+            Con reduced motion la píldora no existe y el estilo activo nativo
+            de shadcn (bg-background) se mantiene. */}
         <Tabs value={view} onValueChange={(v) => setView(v as "editar" | "tintas")}>
-          <TabsList className="h-8">
-            <TabsTrigger value="editar" className="text-xs">Editar</TabsTrigger>
-            <TabsTrigger value="tintas" className="text-xs">Tintas</TabsTrigger>
+          {/* Triggers de tab ~37px de alto: DESVIACIÓN DOCUMENTADA de la regla
+              44px (aceptada por el árbitro): controles adyacentes — un
+              pseudo-extensor invadiría el hit del vecino; cumplen WCAG AA. */}
+          <TabsList className="relative h-11 md:h-8">
+            {!reduced && (
+              <motion.span
+                aria-hidden
+                layoutId="vt-view-pill"
+                className={cn(
+                  "pointer-events-none absolute inset-y-0.5 z-0 w-[calc(50%-4px)] rounded-md bg-background shadow-sm",
+                  view === "editar" ? "left-0.5" : "right-0.5",
+                )}
+                transition={SPRING.pill}
+              />
+            )}
+            <TabsTrigger
+              value="editar"
+              className={cn("relative z-10 text-xs", !reduced && "data-[state=active]:bg-transparent data-[state=active]:shadow-none")}
+            >
+              Editar
+            </TabsTrigger>
+            <TabsTrigger
+              value="tintas"
+              className={cn("relative z-10 text-xs", !reduced && "data-[state=active]:bg-transparent data-[state=active]:shadow-none")}
+            >
+              Tintas
+            </TabsTrigger>
           </TabsList>
         </Tabs>
 
         <div className="ml-auto flex items-center gap-1">
-          <Button size="icon" variant="ghost" className="size-8" aria-label="Deshacer (Ctrl+Z)" disabled={!canUndo || historyBusy} onClick={() => void undo()}>
-            <Undo2 className="h-4 w-4" aria-hidden />
-          </Button>
-          <Button size="icon" variant="ghost" className="size-8" aria-label="Rehacer (Ctrl+Shift+Z)" disabled={!canRedo || historyBusy} onClick={() => void redo()}>
-            <Redo2 className="h-4 w-4" aria-hidden />
-          </Button>
-          <Button size="sm" variant="outline" className="relative" aria-label="Diagnóstico de sesión" onClick={() => setDiagOpen(true)}>
-            <Stethoscope className="h-4 w-4" aria-hidden />
-            {diagnosticsCount > 0 && (
-              <Badge className="absolute -right-1.5 -top-1.5 size-4 justify-center rounded-full bg-accent p-0 text-[9px] text-accent-foreground" aria-label={`${diagnosticsCount} incidencias`}>
-                {diagnosticsCount}
-              </Badge>
-            )}
-          </Button>
+          <motion.div whileTap={reduced ? undefined : TAP}>
+            <Button size="icon" variant="ghost" className="vt-hit size-8" aria-label="Deshacer (Ctrl+Z)" disabled={!canUndo || historyBusy} onClick={() => void undo()}>
+              <Undo2 className="h-4 w-4" aria-hidden />
+            </Button>
+          </motion.div>
+          <motion.div whileTap={reduced ? undefined : TAP}>
+            <Button size="icon" variant="ghost" className="vt-hit size-8" aria-label="Rehacer (Ctrl+Shift+Z)" disabled={!canRedo || historyBusy} onClick={() => void redo()}>
+              <Redo2 className="h-4 w-4" aria-hidden />
+            </Button>
+          </motion.div>
+          <motion.div whileTap={reduced ? undefined : TAP} className="relative">
+            <Button size="sm" variant="outline" className="vt-hit relative" aria-label="Diagnóstico de sesión" onClick={() => setDiagOpen(true)}>
+              <Stethoscope className="h-4 w-4" aria-hidden />
+              <AnimatePresence>
+                {diagnosticsCount > 0 && (
+                  <motion.span
+                    key="diag-badge"
+                    initial={reduced ? false : { scale: 0.4, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.4, opacity: 0 }}
+                    transition={SPRING.pop}
+                    className="absolute -right-1.5 -top-1.5"
+                  >
+                    <Badge className="size-4 justify-center rounded-full bg-accent p-0 text-[9px] text-accent-foreground" aria-label={`${diagnosticsCount} incidencias`}>
+                      {diagnosticsCount}
+                    </Badge>
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </Button>
+          </motion.div>
           {user !== null && (
             <span className="hidden items-center gap-1 pl-1 text-[11px] text-muted-foreground lg:flex" title={user.email}>
               <span className="max-w-28 truncate">{user.name ?? user.email.split("@")[0]}</span>
             </span>
           )}
-          <Button size="icon" variant="ghost" className="size-8" aria-label="Cerrar sesión" onClick={() => void logout()}>
-            <LogOut className="h-4 w-4" aria-hidden />
-          </Button>
+          <motion.div whileTap={reduced ? undefined : TAP}>
+            <Button size="icon" variant="ghost" className="vt-hit size-8" aria-label="Cerrar sesión" onClick={() => void logout()}>
+              <LogOut className="h-4 w-4" aria-hidden />
+            </Button>
+          </motion.div>
         </div>
-      </header>
+      </motion.header>
 
-      {/* ── Zona de trabajo ── */}
+      {/* ── Zona de trabajo: escalonado de paneles (una vez, al entrar) ── */}
       <motion.main
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25 }}
-        className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:grid lg:grid-cols-[300px_minmax(0,1fr)_320px] xl:grid-cols-[320px_minmax(0,1fr)_340px]"
+        initial="hidden"
+        animate="show"
+        variants={stagger(0.08, 0.05)}
+        className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:grid lg:grid-cols-[300px_minmax(0,1fr)_320px] lg:grid-rows-[minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_340px]"
       >
-        <div className="flex min-h-0 flex-col gap-3 lg:overflow-y-auto lg:pr-1 vt-scroll">
+        <motion.div variants={riseIn} className="flex min-h-0 flex-col gap-3 lg:overflow-y-auto lg:pr-1 vt-scroll">
           <AssetPanel />
           <LayerPanel />
-        </div>
-        <div className="flex min-h-[420px] flex-col lg:min-h-0">
+        </motion.div>
+        <motion.div variants={riseIn} className="flex min-h-[420px] flex-col lg:min-h-0">
           {view === "editar" ? <VectorStage /> : <InkPrepView />}
-        </div>
-        <div className="flex min-h-0 flex-col">
+        </motion.div>
+        <motion.div variants={riseIn} className="flex min-h-0 flex-col lg:overflow-y-auto vt-scroll lg:pr-1">
           <InspectorPanel />
-        </div>
+        </motion.div>
       </motion.main>
 
       {/* ── Pie fijo ── */}
       <footer className="mt-auto border-t border-border bg-card/95">
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <Droplets className="h-3.5 w-3.5" aria-hidden />
-            <span className="font-mono">{appConfig.product.name}</span>
+            <Droplets className="h-3.5 w-3.5 text-primary/80" aria-hidden />
+            <span className="font-mono font-semibold tracking-tight text-foreground/80">{appConfig.product.name}</span>
             <span aria-hidden>·</span>
             <span className="font-mono" title="Digest de configuración (GET /api/health)">{configDigest}</span>
           </span>
           <span className="flex items-center gap-3">
-            <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => setSpecOpen(true)}>
+            <button type="button" className="vt-underline inline-flex items-center gap-1 hover:text-foreground" onClick={() => setSpecOpen(true)}>
               <ScrollText className="h-3.5 w-3.5" aria-hidden /> Especificación (iteración 1)
             </button>
-            <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => setDiagOpen(true)}>
+            <button type="button" className="vt-underline inline-flex items-center gap-1 hover:text-foreground" onClick={() => setDiagOpen(true)}>
               <FileText className="h-3.5 w-3.5" aria-hidden /> Diagnóstico
             </button>
           </span>
