@@ -3,17 +3,22 @@
 /**
  * VectorTinta — Carcasa del estudio (ruta única "/", plan §5.1).
  *
- * Layout de tres columnas en escritorio (Fuente+Capas | Lienzo | Inspector)
- * con degradación a flujo vertical en pantallas pequeñas. Footer fijo con el
- * digest de configuración (drift entre entornos) y accesos a Diagnóstico y a
- * la Especificación de la Iteración 1 (overlay sobre la misma ruta, sin
- * rutas nuevas — restricción del entorno).
+ * DESIGN v3 «Mesa de Tinta»: el workspace se sirve en cromo oscuro cálido
+ * (la mesa de entintado); la obra vive en una hoja de papel clara sobre la
+ * mesa (VectorStage). El scope de tema se aplica al <body> mientras el
+ * workspace está montado para que TODOS los portales (Sheet, Dialog,
+ * Popover, toast) hereden el mismo tema; al desmontarse (logout) la puerta
+ * de acceso vuelve a su tema claro de taller.
+ *
+ * Layout: grid por áreas. Escritorio — fuente (auto) + capas (1fr) a la
+ * izquierda, lienzo al centro (dos filas), inspector a la derecha. Móvil —
+ * historia vertical: fuente → lienzo → inspector → capas.
  *
  * Atajos: Ctrl/Cmd+Z deshacer · Ctrl/Cmd+Shift+Z / Ctrl+Y rehacer.
  */
 import * as React from "react";
 import {
-  Droplets, FileText, FolderOpen, LogOut, Redo2, ScrollText, Stethoscope, Undo2,
+  Droplets, FileText, FolderOpen, LogOut, PenLine, Redo2, ScrollText, Stethoscope, Undo2,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
@@ -39,8 +44,6 @@ import { DUR, EASE, riseIn, stagger, inkPulse, SPRING, TAP } from "@/lib/motion"
 export function StudioShell() {
   const boot = useStudio((s) => s.boot);
   const authStatus = useStudio((s) => s.authStatus);
-  const user = useStudio((s) => s.user);
-  const logout = useStudio((s) => s.logout);
 
   React.useEffect(() => {
     void boot();
@@ -119,21 +122,49 @@ function Workspace() {
   const [nameDraft, setNameDraft] = React.useState(project?.name ?? "");
   React.useEffect(() => setNameDraft(project?.name ?? ""), [project?.id, project?.name]);
 
+  /* Tema «Mesa de Tinta» en el <body>: los portales (Sheet/Dialog/Popover/
+     toast) viven fuera de este árbol React y deben heredar el scope. */
+  React.useEffect(() => {
+    document.body.classList.add("vt-studio");
+    return () => document.body.classList.remove("vt-studio");
+  }, []);
+
+  const initials = (user?.name ?? user?.email ?? "?")
+    .split(/[\s@.]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
+
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground lg:h-screen lg:overflow-hidden">
-      {/* ── Cabecera ── */}
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: reduced ? 0 : DUR.slow, ease: EASE.inOut }}
+      className="flex min-h-screen flex-col bg-background text-foreground lg:h-screen lg:overflow-hidden"
+    >
+      {/* ── Barra superior del estudio ── */}
       <motion.header
-        initial={{ opacity: 0, y: reduced ? 0 : -12 }}
+        initial={{ opacity: 0, y: reduced ? 0 : -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: DUR.base, ease: EASE.signature }}
-        className="sticky top-0 z-30 flex min-h-14 items-center gap-2 border-b border-border bg-card/95 px-3 py-2 backdrop-blur"
+        className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-1.5 border-b border-border bg-card px-2 sm:gap-2 sm:px-3"
       >
+        {/* Marca del taller */}
+        <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-b from-[#d13a54] to-[#b52440] shadow-[inset_0_1px_0_rgba(255,246,240,0.25),0_2px_8px_-2px_rgba(193,40,65,0.55)]">
+          <Droplets className="size-3.5 text-[#fff6f0]" />
+        </span>
+        <span className="hidden shrink-0 text-[13px] font-semibold tracking-tight md:block">
+          VectorTinta
+        </span>
+        <span aria-hidden className="hidden h-4 w-px bg-border md:block" />
+
         <TooltipProvider delayDuration={400}>
           <Tooltip>
             <TooltipTrigger asChild>
               <motion.div whileTap={reduced ? undefined : TAP}>
-                <Button size="sm" variant="outline" aria-label="Abrir proyectos" onClick={() => setDrawerOpen(true)}>
-                  <FolderOpen className="h-4 w-4" aria-hidden />
+                <Button size="sm" variant="ghost" className="vt-hit h-8 gap-1.5 rounded-full px-2.5 text-xs" aria-label="Abrir proyectos" onClick={() => setDrawerOpen(true)}>
+                  <FolderOpen className="size-3.5" aria-hidden />
                   <span className="hidden sm:inline">Proyectos</span>
                 </Button>
               </motion.div>
@@ -142,7 +173,8 @@ function Workspace() {
           </Tooltip>
         </TooltipProvider>
 
-        <div className="mx-auto hidden max-w-md flex-1 items-center justify-center md:flex">
+        {/* Nombre del proyecto: píldora editable */}
+        <div className="mx-auto flex min-w-0 max-w-[260px] flex-1 justify-center px-1">
           <Input
             value={nameDraft}
             onChange={(e) => setNameDraft(e.target.value)}
@@ -151,25 +183,25 @@ function Workspace() {
             }}
             aria-label="Nombre del proyecto actual"
             disabled={project === null}
-            className="h-8 border-transparent bg-transparent text-center font-mono text-sm hover:border-input focus-visible:bg-card"
+            className="h-7 w-full min-w-0 rounded-full border-transparent bg-transparent text-center text-xs font-medium placeholder:text-muted-foreground/60 hover:border-input focus-visible:bg-secondary"
             placeholder="Sin proyecto abierto"
           />
         </div>
 
         {/* Conmutador de vista con píldora deslizante (layoutId, spring).
             Con reduced motion la píldora no existe y el estilo activo nativo
-            de shadcn (bg-background) se mantiene. */}
+            de shadcn se mantiene. */}
         <Tabs value={view} onValueChange={(v) => setView(v as "editar" | "tintas")}>
-          {/* Triggers de tab ~37px de alto: DESVIACIÓN DOCUMENTADA de la regla
+          {/* Triggers de tab ~30px de alto: DESVIACIÓN DOCUMENTADA de la regla
               44px (aceptada por el árbitro): controles adyacentes — un
               pseudo-extensor invadiría el hit del vecino; cumplen WCAG AA. */}
-          <TabsList className="relative h-11 md:h-8">
+          <TabsList className="h-8 rounded-full border border-border bg-secondary/60 p-0.5">
             {!reduced && (
               <motion.span
                 aria-hidden
                 layoutId="vt-view-pill"
                 className={cn(
-                  "pointer-events-none absolute inset-y-0.5 z-0 w-[calc(50%-4px)] rounded-md bg-background shadow-sm",
+                  "pointer-events-none absolute inset-y-0.5 z-0 w-[calc(50%-2px)] rounded-full bg-[rgba(251,248,238,0.09)] shadow-[inset_0_1px_0_rgba(251,248,238,0.07),0_1px_3px_rgba(0,0,0,0.35)]",
                   view === "editar" ? "left-0.5" : "right-0.5",
                 )}
                 transition={SPRING.pill}
@@ -177,33 +209,37 @@ function Workspace() {
             )}
             <TabsTrigger
               value="editar"
-              className={cn("relative z-10 text-xs", !reduced && "data-[state=active]:bg-transparent data-[state=active]:shadow-none")}
+              className={cn("relative z-10 h-7 gap-1.5 rounded-full px-2.5 text-[11px] font-medium sm:px-3", !reduced && "data-[state=active]:bg-transparent data-[state=active]:shadow-none")}
             >
-              Editar
+              <PenLine className="hidden size-3 sm:inline" aria-hidden /> Editar
             </TabsTrigger>
             <TabsTrigger
               value="tintas"
-              className={cn("relative z-10 text-xs", !reduced && "data-[state=active]:bg-transparent data-[state=active]:shadow-none")}
+              className={cn("relative z-10 h-7 gap-1.5 rounded-full px-2.5 text-[11px] font-medium sm:px-3", !reduced && "data-[state=active]:bg-transparent data-[state=active]:shadow-none")}
             >
-              Tintas
+              <Droplets className="hidden size-3 sm:inline" aria-hidden /> Tintas
             </TabsTrigger>
           </TabsList>
         </Tabs>
 
-        <div className="ml-auto flex items-center gap-1">
-          <motion.div whileTap={reduced ? undefined : TAP}>
-            <Button size="icon" variant="ghost" className="vt-hit size-8" aria-label="Deshacer (Ctrl+Z)" disabled={!canUndo || historyBusy} onClick={() => void undo()}>
-              <Undo2 className="h-4 w-4" aria-hidden />
-            </Button>
-          </motion.div>
-          <motion.div whileTap={reduced ? undefined : TAP}>
-            <Button size="icon" variant="ghost" className="vt-hit size-8" aria-label="Rehacer (Ctrl+Shift+Z)" disabled={!canRedo || historyBusy} onClick={() => void redo()}>
-              <Redo2 className="h-4 w-4" aria-hidden />
-            </Button>
-          </motion.div>
+        <div className="ml-auto flex items-center gap-1.5">
+          {/* Grupo deshacer/rehacer: cápsula de toolbar pro */}
+          <span className="flex items-center rounded-full border border-border bg-secondary/60 p-0.5">
+            <motion.div whileTap={reduced ? undefined : TAP}>
+              <Button size="icon" variant="ghost" className="vt-hit size-7 rounded-full" aria-label="Deshacer (Ctrl+Z)" disabled={!canUndo || historyBusy} onClick={() => void undo()}>
+                <Undo2 className="size-3.5" aria-hidden />
+              </Button>
+            </motion.div>
+            <motion.div whileTap={reduced ? undefined : TAP}>
+              <Button size="icon" variant="ghost" className="vt-hit size-7 rounded-full" aria-label="Rehacer (Ctrl+Shift+Z)" disabled={!canRedo || historyBusy} onClick={() => void redo()}>
+                <Redo2 className="size-3.5" aria-hidden />
+              </Button>
+            </motion.div>
+          </span>
+
           <motion.div whileTap={reduced ? undefined : TAP} className="relative">
-            <Button size="sm" variant="outline" className="vt-hit relative" aria-label="Diagnóstico de sesión" onClick={() => setDiagOpen(true)}>
-              <Stethoscope className="h-4 w-4" aria-hidden />
+            <Button size="icon" variant="ghost" className="vt-hit relative size-8 rounded-full" aria-label="Diagnóstico de sesión" onClick={() => setDiagOpen(true)}>
+              <Stethoscope className="size-3.5" aria-hidden />
               <AnimatePresence>
                 {diagnosticsCount > 0 && (
                   <motion.span
@@ -212,9 +248,9 @@ function Workspace() {
                     animate={{ scale: 1, opacity: 1 }}
                     exit={{ scale: 0.4, opacity: 0 }}
                     transition={SPRING.pop}
-                    className="absolute -right-1.5 -top-1.5"
+                    className="absolute -right-0.5 -top-0.5"
                   >
-                    <Badge className="size-4 justify-center rounded-full bg-accent p-0 text-[9px] text-accent-foreground" aria-label={`${diagnosticsCount} incidencias`}>
+                    <Badge className="size-4 justify-center rounded-full bg-primary p-0 text-[9px] text-primary-foreground" aria-label={`${diagnosticsCount} incidencias`}>
                       {diagnosticsCount}
                     </Badge>
                   </motion.span>
@@ -222,56 +258,67 @@ function Workspace() {
               </AnimatePresence>
             </Button>
           </motion.div>
+
           {user !== null && (
-            <span className="hidden items-center gap-1 pl-1 text-[11px] text-muted-foreground lg:flex" title={user.email}>
-              <span className="max-w-28 truncate">{user.name ?? user.email.split("@")[0]}</span>
+            <span className="hidden h-8 items-center gap-2 rounded-full border border-border bg-secondary/60 pl-1 pr-2.5 lg:flex" title={user.email}>
+              <span aria-hidden className="flex size-6 items-center justify-center rounded-full bg-[var(--vt-copper-soft)] font-mono text-[10px] font-semibold text-[var(--vt-copper)]">
+                {initials}
+              </span>
+              <span className="max-w-24 truncate text-[11px] text-muted-foreground">{user.name ?? user.email.split("@")[0]}</span>
             </span>
           )}
           <motion.div whileTap={reduced ? undefined : TAP}>
-            <Button size="icon" variant="ghost" className="vt-hit size-8" aria-label="Cerrar sesión" onClick={() => void logout()}>
-              <LogOut className="h-4 w-4" aria-hidden />
+            <Button size="icon" variant="ghost" className="vt-hit size-8 rounded-full" aria-label="Cerrar sesión" onClick={() => void logout()}>
+              <LogOut className="size-3.5" aria-hidden />
             </Button>
           </motion.div>
         </div>
       </motion.header>
 
-      {/* ── Zona de trabajo: escalonado de paneles (una vez, al entrar) ── */}
+      {/* ── Mesa de trabajo: grid por áreas, escalonado de entrada ──
+          Móvil: fuente → lienzo → inspector → capas (historia vertical).
+          Escritorio: filas FRACCIONADAS y acotadas — fuente (3fr, scroll
+          interno propio) + capas (2fr, SIEMPRE dentro del viewport) | lienzo
+          (ambas filas) | inspector (ambas filas). */}
       <motion.main
         initial="hidden"
         animate="show"
-        variants={stagger(0.08, 0.05)}
-        className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:grid lg:grid-cols-[300px_minmax(0,1fr)_320px] lg:grid-rows-[minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_340px]"
+        variants={stagger(0.07, 0.06)}
+        className="grid min-h-0 flex-1 grid-cols-1 gap-2 p-2 lg:grid-cols-[300px_minmax(0,1fr)_320px] lg:grid-rows-[minmax(0,11fr)_minmax(0,9fr)] lg:[grid-template-areas:'source_canvas_inspector''layers_canvas_inspector'] xl:grid-cols-[320px_minmax(0,1fr)_340px]"
       >
-        <motion.div variants={riseIn} className="flex min-h-0 flex-col gap-3 lg:overflow-y-auto lg:pr-1 vt-scroll">
+        <motion.div variants={riseIn} className="order-1 flex min-h-0 flex-col lg:[grid-area:source] lg:overflow-y-auto lg:pr-1 vt-scroll">
           <AssetPanel />
-          <LayerPanel />
         </motion.div>
-        <motion.div variants={riseIn} className="flex min-h-[420px] flex-col lg:min-h-0">
+        <motion.div variants={riseIn} className="order-2 flex min-h-[380px] flex-col lg:min-h-0 lg:[grid-area:canvas]">
           {view === "editar" ? <VectorStage /> : <InkPrepView />}
         </motion.div>
-        <motion.div variants={riseIn} className="flex min-h-0 flex-col lg:overflow-y-auto vt-scroll lg:pr-1">
+        <motion.div variants={riseIn} className="order-3 flex min-h-0 flex-col lg:[grid-area:inspector] lg:max-h-full lg:overflow-y-auto lg:pr-1 vt-scroll">
           <InspectorPanel />
+        </motion.div>
+        <motion.div variants={riseIn} className="order-4 flex min-h-0 flex-col lg:[grid-area:layers]">
+          <LayerPanel />
         </motion.div>
       </motion.main>
 
-      {/* ── Pie fijo ── */}
-      <footer className="mt-auto border-t border-border bg-card/95">
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <Droplets className="h-3.5 w-3.5 text-primary/80" aria-hidden />
-            <span className="font-mono font-semibold tracking-tight text-foreground/80">{appConfig.product.name}</span>
-            <span aria-hidden>·</span>
-            <span className="font-mono" title="Digest de configuración (GET /api/health)">{configDigest}</span>
+      {/* ── Barra de estado ── */}
+      <footer className="mt-auto flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border bg-card/80 px-3 py-1.5 text-[10px] text-muted-foreground backdrop-blur">
+        <span className="flex min-w-0 items-center gap-1.5 font-mono">
+          <span aria-hidden className="relative flex size-1.5">
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400/60" />
+            <span className="relative inline-flex size-1.5 rounded-full bg-emerald-400/90" />
           </span>
-          <span className="flex items-center gap-3">
-            <button type="button" className="vt-underline inline-flex items-center gap-1 hover:text-foreground" onClick={() => setSpecOpen(true)}>
-              <ScrollText className="h-3.5 w-3.5" aria-hidden /> Especificación (iteración 1)
-            </button>
-            <button type="button" className="vt-underline inline-flex items-center gap-1 hover:text-foreground" onClick={() => setDiagOpen(true)}>
-              <FileText className="h-3.5 w-3.5" aria-hidden /> Diagnóstico
-            </button>
-          </span>
-        </div>
+          <span className="font-semibold tracking-tight text-foreground/80">{appConfig.product.name}</span>
+          <span aria-hidden>·</span>
+          <span title="Digest de configuración (GET /api/health)" className="truncate">{configDigest}</span>
+        </span>
+        <span className="flex items-center gap-3">
+          <button type="button" className="vt-underline inline-flex items-center gap-1 hover:text-foreground" onClick={() => setSpecOpen(true)}>
+            <ScrollText className="size-3" aria-hidden /> Especificación (iteración 1)
+          </button>
+          <button type="button" className="vt-underline inline-flex items-center gap-1 hover:text-foreground" onClick={() => setDiagOpen(true)}>
+            <FileText className="size-3" aria-hidden /> Diagnóstico
+          </button>
+        </span>
       </footer>
 
       {/* Overlays (misma ruta, sin rutas nuevas) */}
@@ -279,7 +326,7 @@ function Workspace() {
       <DiagnosticsTray open={diagOpen} onOpenChange={setDiagOpen} />
       <CriticalModal />
       <SpecOverlay open={specOpen} onOpenChange={setSpecOpen} />
-    </div>
+    </motion.div>
   );
 }
 

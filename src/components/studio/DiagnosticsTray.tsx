@@ -43,7 +43,7 @@ export function DiagnosticsTray({ open, onOpenChange }: { open: boolean; onOpenC
                   </div>
                   <p className="mt-1 text-xs font-medium leading-snug">{d.title}</p>
                   {d.detail !== undefined && <p className="mt-0.5 break-words text-[11px] leading-snug text-muted-foreground">{d.detail}</p>}
-                  {d.action !== undefined && <p className="mt-1 text-[11px] font-medium text-accent">→ {d.action}</p>}
+                  {d.action !== undefined && <p className="mt-1 text-[11px] font-medium text-[var(--vt-copper)]">→ {d.action}</p>}
                 </div>
               ))
           )}

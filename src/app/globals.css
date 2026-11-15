@@ -161,6 +161,134 @@ g[data-selected="true"] > * {
   background-size: 14px 14px;
 }
 
+/* ───────── Sistema "Mesa de Tinta" (design v3, programa) ───────── */
+/* El WORKSPACE se sirve en cromo oscuro cálido: la mesa de entintado.
+   La obra vive en una hoja de papel clara sobre la mesa (vt-sheet).
+   Este scope se aplica al <body> mientras el workspace está montado,
+   de modo que TODOS los portales (Sheet, Dialog, Popover, toast)
+   heredan el mismo tema. La puerta de acceso (AuthGate) y el arranque
+   siguen en el tema claro de taller. */
+.vt-studio {
+  --background: #17130e;
+  --foreground: #f0eadd;
+  --card: #1f1a13;
+  --card-foreground: #f0eadd;
+  --popover: #262017;
+  --popover-foreground: #f0eadd;
+  --primary: #c12841;
+  --primary-foreground: #fff6f0;
+  --secondary: #2a2318;
+  --secondary-foreground: #e8e0d0;
+  --muted: #282217;
+  --muted-foreground: #a89c82;
+  --accent: #35262a;
+  --accent-foreground: #f0eadd;
+  --destructive: #e5534a;
+  --border: rgba(240, 234, 221, 0.09);
+  --input: rgba(240, 234, 221, 0.14);
+  --ring: #d84a63;
+  /* Cobre claro: acento de TEXTO sobre fondo oscuro (links de acción,
+     estados activos) — el accent de fondo es otra cosa. */
+  --vt-copper: #e0647c;
+  --vt-copper-soft: rgba(224, 100, 124, 0.16);
+  --sidebar: #1f1a13;
+  --sidebar-foreground: #f0eadd;
+  --sidebar-primary: #c12841;
+  --sidebar-primary-foreground: #fff6f0;
+  --sidebar-accent: #35262a;
+  --sidebar-accent-foreground: #f0eadd;
+  --sidebar-border: rgba(240, 234, 221, 0.09);
+  --sidebar-ring: #d84a63;
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+/* Mesa del lienzo: tinta profunda con grano y viñeta; el spotlight
+   lo aporta VectorStage con un div compositor-only. */
+.vt-desk {
+  background-color: #131009;
+  background-image: radial-gradient(rgba(240, 234, 221, 0.045) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+}
+
+/* Hoja de papel: la obra sobre la mesa. */
+.vt-sheet {
+  background: #fbf8ee;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 6px 14px -6px rgba(0, 0, 0, 0.5),
+    0 24px 48px -16px rgba(0, 0, 0, 0.55);
+}
+
+/* Paneles del estudio en la mesa oscura: bisel superior sutil + borde
+   translúcido + sombra en capas (profundidad real, cero Win98). */
+.vt-studio .vt-panel {
+  background:
+    linear-gradient(180deg, rgba(251, 248, 238, 0.03), rgba(251, 248, 238, 0) 48px),
+    var(--card);
+  border: 1px solid rgba(240, 234, 221, 0.075);
+  box-shadow:
+    inset 0 1px 0 rgba(251, 248, 238, 0.04),
+    0 10px 28px -18px rgba(0, 0, 0, 0.65);
+  transition: box-shadow 0.28s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.vt-studio .vt-panel:hover {
+  border-color: rgba(240, 234, 221, 0.13);
+  box-shadow:
+    inset 0 1px 0 rgba(251, 248, 238, 0.05),
+    0 14px 34px -18px rgba(0, 0, 0, 0.7);
+}
+
+/* Botón primario de la mesa: cobre con halo al hover (solo sombra:
+   compositor-friendly). */
+.vt-studio .vt-btn-copper {
+  background: linear-gradient(180deg, #d13a54, #b52440);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 246, 240, 0.22),
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 6px 16px -8px rgba(193, 40, 65, 0.55);
+  transition: box-shadow 0.24s cubic-bezier(0.22, 1, 0.36, 1), filter 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.vt-studio .vt-btn-copper:hover:not(:disabled) {
+  filter: brightness(1.07);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 246, 240, 0.28),
+    0 2px 3px rgba(0, 0, 0, 0.4),
+    0 10px 26px -8px rgba(193, 40, 65, 0.75);
+}
+
+/* Scrollbars del estudio (solo dentro del scope). */
+.vt-studio .vt-scroll { scrollbar-color: rgba(240, 234, 221, 0.28) transparent; }
+.vt-studio .vt-scroll::-webkit-scrollbar-thumb { background: rgba(240, 234, 221, 0.26); border-radius: 4px; }
+
+/* Lista con más contenido debajo: el borde inferior se DESVANECE de verdad
+   (mask, no overlay) — affordance de scroll honesta. Se aplica solo cuando
+   la lista desborda (lo decide LayerPanel con ResizeObserver). */
+.vt-scroll-fade {
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 30px), transparent 100%);
+  mask-image: linear-gradient(to bottom, black calc(100% - 30px), transparent 100%);
+}
+
+/* Marcador de recompilación (turbopack). */
+
+/* Rótulos de sección de panel: mayúsculas técnicas con tracking. */
+.vt-studio .vt-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+/* Toasts del estudio: sonner pinta su propio tema; dentro del scope se
+   re-mapea al de la mesa oscura (los richColors conservan su tinte). */
+.vt-studio [data-sonner-toaster] {
+  --normal-bg: #262017;
+  --normal-text: #f0eadd;
+  --normal-border: rgba(240, 234, 221, 0.12);
+  --normal-border-radius: 10px;
+}
+
 /* ───────── Sistema "Taller Vivo" (design v2) ───────── */
 
 /* Malla de tinta para la puerta de acceso: halftone + glow cooper orgánico. */
@@ -249,10 +377,20 @@ g[data-selected="true"] > * {
     animation: none;
   }
   .vt-panel,
-  .vt-panel:hover {
+  .vt-panel:hover,
+  .vt-studio .vt-panel,
+  .vt-studio .vt-panel:hover,
+  .vt-studio .vt-btn-copper,
+  .vt-studio .vt-btn-copper:hover:not(:disabled) {
     transition: none;
   }
   .vt-underline::after {
     transition: none;
   }
+}
+
+/* El tema del estudio nunca debe translucir el fondo claro del body:
+   se pinta sólido desde el propio scope (portales incluidos). */
+.vt-studio[data-vt-root="on"] {
+  background-color: var(--background);
 }

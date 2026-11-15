@@ -3,12 +3,15 @@
 /**
  * VectorTinta — Vista Preparación de tintas (plan §1.1 punto 6).
  *
- * Una fila por capa con: marca de tinta única (patrón de configuración),
- * color HEX + nombre, área cubierta (px y %), archivo de exportación que
- * TENDRÁ dentro del ZIP (patrón {orden:02d}-{colorHex}-{layerId}.svg) y
- * visibilidad. El orden de impresión se DERIVA de la estrategia de
- * configuración (export.printOrderStrategy): by-area-desc = mayor cobertura
- * primero; by-lightness = tintas claras primero (clásico serigráfico).
+ * Una TARJETA por capa (design v3: la tabla de 7 columnas no cabía en el
+ * panel central sin scroll horizontal; las tarjetas fluyen a cualquier
+ * ancho). Cada tarjeta lleva: marca de tinta única (patrón de
+ * configuración), color HEX + nombre, área cubierta (px y %), archivo de
+ * exportación que TENDRÁ dentro del ZIP (patrón
+ * {orden:02d}-{colorHex}-{layerId}.svg) y visibilidad. El orden de impresión
+ * se DERIVA de la estrategia de configuración (export.printOrderStrategy):
+ * by-area-desc = mayor cobertura primero; by-lightness = tintas claras
+ * primero (clásico serigráfico).
  */
 import * as React from "react";
 import { Droplets, ListOrdered } from "lucide-react";
@@ -17,7 +20,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { appConfig } from "@/lib/config/app.config";
 import { relativeLightness } from "@/lib/domain/invariants";
 import { renderFilePattern, renderInkMark } from "@/lib/registries/formats/manifests";
@@ -42,7 +44,7 @@ function NameCell({ layer, onCommit }: { layer: ClientLayer; onCommit: (name: st
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
       }}
       aria-label={`Nombre de la tinta ${layer.name}`}
-      className="h-7 w-32 border-transparent bg-transparent px-1 text-xs hover:border-input focus-visible:bg-card"
+      className="h-7 min-w-0 flex-1 border-transparent bg-transparent px-1 text-xs font-medium hover:border-input focus-visible:bg-card"
     />
   );
 }
@@ -63,7 +65,7 @@ function HexCell({ layer, onCommit }: { layer: ClientLayer; onCommit: (hex: stri
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
       }}
       aria-label={`HEX de la tinta ${layer.name}`}
-      className="h-7 w-24 font-mono text-[11px]"
+      className="h-7 w-[76px] shrink-0 border-transparent bg-secondary/50 px-1.5 font-mono text-[11px] hover:border-input focus-visible:bg-card"
     />
   );
 }
@@ -97,18 +99,18 @@ export function InkPrepView() {
   const status = layers.length === 0 ? "empty" : workspaceStatus;
 
   return (
-    <Card className="vt-panel flex min-h-0 flex-1 flex-col border-border/80">
-      <CardHeader className="pb-2">
+    <Card className="vt-panel flex min-h-0 flex-1 flex-col">
+      <CardHeader className="px-4 pb-3 pt-4">
         <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-sm font-semibold">
           <span className="flex items-center gap-2">
-            <Droplets className="h-4 w-4" aria-hidden /> Preparación de tintas
+            <Droplets className="size-4 text-[var(--vt-copper)]" aria-hidden /> Preparación de tintas
           </span>
-          <Badge variant="outline" className="gap-1 border-border bg-secondary font-mono text-[10px] font-normal">
-            <ListOrdered className="h-3 w-3" aria-hidden /> estrategia: {strategy}
+          <Badge variant="outline" className="gap-1 border-border bg-secondary/60 font-mono text-[10px] font-normal text-muted-foreground">
+            <ListOrdered className="size-3" aria-hidden /> estrategia: {strategy}
           </Badge>
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col">
+      <CardContent className="flex min-h-0 flex-1 flex-col px-4 pb-4">
         <PanelStates
           ariaLabel="Preparación de tintas"
           status={status}
@@ -120,112 +122,90 @@ export function InkPrepView() {
             />
           }
         >
-          <div className="vt-scroll min-h-0 flex-1 overflow-auto">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <TableHead className="w-10 text-[11px]">Nº</TableHead>
-                  <TableHead className="text-[11px]">Marca de tinta</TableHead>
-                  <TableHead className="text-[11px]">Tinta</TableHead>
-                  <TableHead className="text-[11px]">Cobertura</TableHead>
-                  <TableHead className="text-[11px]">Área</TableHead>
-                  <TableHead className="text-[11px]">Archivo en ZIP</TableHead>
-                  <TableHead className="w-14 text-[11px]">Visible</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {printOrder.map(({ layer, order }, idx) => {
-                  const coverage = totalPx > 0 ? (layer.areaPx / totalPx) * 100 : 0;
-                  const selected = selectedLayerId === layer.id;
-                  return (
-                    <motion.tr
-                      key={layer.id}
-                      onClick={() => selectLayer(layer.id)}
-                      className={cn(
-                        "cursor-pointer border-b border-border/50 transition-colors hover:bg-muted/50",
-                        selected && "bg-accent/15 hover:bg-accent/15",
-                      )}
-                      aria-current={selected ? "true" : undefined}
-                      initial={reduced ? false : { opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: DUR.base, ease: EASE.signature, delay: reduced ? 0 : Math.min(idx * 0.05, 0.35) }}
+          <div className="vt-scroll -mr-1 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-1">
+            {printOrder.map(({ layer, order }, idx) => {
+              const coverage = totalPx > 0 ? (layer.areaPx / totalPx) * 100 : 0;
+              const selected = selectedLayerId === layer.id;
+              const fileName = renderFilePattern(order, layer.colorHex, layer.id);
+              return (
+                <motion.div
+                  key={layer.id}
+                  onClick={() => selectLayer(layer.id)}
+                  className={cn(
+                    // shrink-0: la tarjeta conserva su altura natural dentro
+                    // del contenedor flex acotado (patrón de la fila de capa).
+                    "relative shrink-0 cursor-pointer overflow-hidden rounded-lg border px-3 py-2 transition-colors",
+                    selected
+                      ? "border-[var(--vt-copper)]/50 bg-[var(--vt-copper-soft)]"
+                      : "border-border/70 bg-card/60 hover:border-foreground/20 hover:bg-secondary/40",
+                  )}
+                  aria-current={selected ? "true" : undefined}
+                  initial={reduced ? false : { opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: DUR.base, ease: EASE.signature, delay: reduced ? 0 : Math.min(idx * 0.05, 0.35) }}
+                >
+                  {selected && <span aria-hidden className="absolute inset-y-1.5 left-0 w-[3px] rounded-r bg-[var(--vt-copper)]" />}
+                  {/* Línea 1: orden · marca · tinta (swatch+nombre+hex) · visibilidad */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="shrink-0 font-mono text-xs font-semibold tabular-nums text-muted-foreground">
+                      {String(order).padStart(2, "0")}
+                    </span>
+                    <motion.code
+                      key={layer.colorHex}
+                      initial={reduced ? false : { scale: 0.9, opacity: 0.6 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={SPRING.pop}
+                      className="shrink-0 rounded border border-border bg-secondary/70 px-1.5 py-0.5 font-mono text-[11px]"
                     >
-                      <TableCell className="font-mono text-xs tabular-nums">{String(order).padStart(2, "0")}</TableCell>
-                      <TableCell>
-                        <motion.code
-                          key={layer.colorHex}
-                          initial={reduced ? false : { scale: 0.9, opacity: 0.6 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          transition={SPRING.pop}
-                          className="inline-block rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px]"
-                        >
-                          {renderInkMark(order, layer.colorHex)}
-                        </motion.code>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1.5">
-                          <ColorSwatch hex={layer.colorHex} size={20} />
-                          <NameCell layer={layer} onCommit={(name) => renameLayer(layer.id, name)} />
-                          <HexCell layer={layer} onCommit={(hex) => recolorLayer(layer.id, hex)} />
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
-                            {/* scaleX sobre track fijo (ARB1-5: compositor-only y el spring
-                                SÍ ocurre en el mount; width no se anima jamás). */}
-                            <motion.div
-                              className="h-full w-full rounded-full"
-                              style={{ backgroundColor: layer.colorHex, transformOrigin: "left" }}
-                              initial={{ scaleX: 0 }}
-                              animate={{ scaleX: Math.min(1, Math.max(0, coverage / 100)) }}
-                              transition={SPRING.bar}
-                            />
-                          </div>
-                          <span className="font-mono text-[11px] tabular-nums">{Math.round(coverage * 100) / 100} %</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono text-[11px] tabular-nums">{layer.areaPx.toLocaleString("es")} px²</TableCell>
-                      <TableCell>
-                        <code className="break-all font-mono text-[10px] text-muted-foreground">{renderFilePattern(order, layer.colorHex, layer.id)}</code>
-                      </TableCell>
-                      <TableCell>
-                        <Switch
-                          checked={layer.visible}
-                          onCheckedChange={(v) => toggleVisible(layer.id, v)}
-                          aria-label={`Visibilidad de la tinta ${layer.name}`}
+                      {renderInkMark(order, layer.colorHex)}
+                    </motion.code>
+                    <ColorSwatch hex={layer.colorHex} size={18} />
+                    <NameCell layer={layer} onCommit={(name) => renameLayer(layer.id, name)} />
+                    <HexCell layer={layer} onCommit={(hex) => recolorLayer(layer.id, hex)} />
+                    <Switch
+                      checked={layer.visible}
+                      onCheckedChange={(v) => toggleVisible(layer.id, v)}
+                      aria-label={`Visibilidad de la tinta ${layer.name}`}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                  {/* Línea 2: cobertura (barra+%) · área · archivo en ZIP */}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5 font-mono text-[10px] text-muted-foreground">
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <span className="block h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+                        <motion.span
+                          className="block h-full w-full rounded-full"
+                          style={{ backgroundColor: layer.colorHex, transformOrigin: "left" }}
+                          initial={{ scaleX: 0 }}
+                          animate={{ scaleX: Math.min(1, Math.max(0, coverage / 100)) }}
+                          transition={SPRING.bar}
                         />
-                      </TableCell>
-                    </motion.tr>
-                  );
-                })}
-                {excluded.map((layer) => (
-                  <TableRow key={layer.id} className="opacity-50">
-                    <TableCell className="font-mono text-xs">—</TableCell>
-                    <TableCell>
-                      <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">excluida (oculta)</code>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        <ColorSwatch hex={layer.colorHex} size={16} />
-                        <span className="text-xs">{layer.name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground">no se imprime</TableCell>
-                    <TableCell className="font-mono text-[11px] tabular-nums">{layer.areaPx.toLocaleString("es")} px²</TableCell>
-                    <TableCell className="text-[10px] text-muted-foreground">—</TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={layer.visible}
-                        onCheckedChange={(v) => toggleVisible(layer.id, v)}
-                        aria-label={`Visibilidad de la tinta ${layer.name}`}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <p className="p-3 text-[11px] leading-relaxed text-muted-foreground">
+                      </span>
+                      <span className="tabular-nums">{Math.round(coverage * 100) / 100} %</span>
+                    </span>
+                    <span className="shrink-0 tabular-nums">{layer.areaPx.toLocaleString("es")} px²</span>
+                    <span className="min-w-0 flex-1 truncate" title={fileName}>
+                      {fileName}
+                    </span>
+                  </div>
+                </motion.div>
+              );
+            })}
+            {excluded.map((layer) => (
+              <div key={layer.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border/70 px-3 py-2 opacity-50">
+                <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">—</span>
+                <span className="shrink-0 rounded border border-border bg-secondary/70 px-1.5 py-0.5 font-mono text-[11px]">excluida (oculta)</span>
+                <ColorSwatch hex={layer.colorHex} size={16} />
+                <span className="min-w-0 flex-1 truncate text-xs">{layer.name}</span>
+                <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{layer.areaPx.toLocaleString("es")} px²</span>
+                <Switch
+                  checked={layer.visible}
+                  onCheckedChange={(v) => toggleVisible(layer.id, v)}
+                  aria-label={`Visibilidad de la tinta ${layer.name}`}
+                />
+              </div>
+            ))}
+            <p className="p-2 text-[11px] leading-relaxed text-muted-foreground">
               {printOrder.length} tinta(s) imprimirán en este orden según la estrategia <code className="font-mono">{strategy}</code> de configuración; las capas ocultas quedan fuera del ZIP y constan en el manifiesto como excluidas. Los archivos se llaman según el patrón{" "}
               <code className="font-mono">{appConfig.export.filePattern}</code>.
             </p>

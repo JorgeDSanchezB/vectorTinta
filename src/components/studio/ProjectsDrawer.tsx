@@ -46,15 +46,20 @@ function ProjectRow({ index, style, projects, currentId, onOpen, onAskDelete }: 
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") onOpen(p.id);
         }}
-        className={`flex h-full cursor-pointer items-center gap-3 rounded-md border px-3 transition-colors ${
-          isCurrent ? "border-accent bg-accent/5" : "border-border/70 bg-card hover:border-foreground/25"
+        className={`group relative flex h-full cursor-pointer items-center gap-3 overflow-hidden rounded-lg border px-3 transition-colors ${
+          isCurrent
+            ? "border-[var(--vt-copper)]/45 bg-[var(--vt-copper-soft)]"
+            : "border-border/70 bg-card/70 hover:border-foreground/20 hover:bg-secondary/50"
         }`}
       >
+        {isCurrent && (
+          <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-r bg-[var(--vt-copper)]" />
+        )}
         {typeof p.thumbnailUrl === "string" ? (
-          <img src={p.thumbnailUrl} alt={`Miniatura de ${p.name}`} className="h-11 w-11 rounded object-contain" loading="lazy" />
+          <img src={p.thumbnailUrl} alt={`Miniatura de ${p.name}`} className="h-11 w-11 rounded-md border border-border object-contain" loading="lazy" />
         ) : (
-          <span className="vt-halftone flex h-11 w-11 items-center justify-center rounded" aria-hidden>
-            <FolderOpen className="h-4 w-4 text-muted-foreground" />
+          <span className="vt-halftone flex h-11 w-11 items-center justify-center rounded-md border border-border" aria-hidden>
+            <FolderOpen className="size-4 text-muted-foreground" />
           </span>
         )}
         <span className="min-w-0 flex-1">
@@ -66,14 +71,14 @@ function ProjectRow({ index, style, projects, currentId, onOpen, onAskDelete }: 
         <Button
           size="icon"
           variant="ghost"
-          className="vt-hit size-7 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+          className="vt-hit size-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
           aria-label={`Eliminar el proyecto ${p.name}`}
           onClick={(e) => {
             e.stopPropagation();
             onAskDelete(p.id);
           }}
         >
-          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+          <Trash2 className="size-3.5" aria-hidden />
         </Button>
       </div>
     </div>
@@ -158,7 +163,7 @@ export function ProjectsDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
               aria-label="Descripción del proyecto"
               className="min-h-16 text-xs"
             />
-            <Button type="submit" size="sm" className="w-full" disabled={creating || name.trim() === ""}>
+            <Button type="submit" size="sm" className="vt-btn-copper w-full font-semibold" disabled={creating || name.trim() === ""}>
               {creating ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Plus className="mr-1 h-3.5 w-3.5" aria-hidden />}
               Crear proyecto
             </Button>

@@ -7,9 +7,13 @@
  * PresetRegistry (label/min/max/step/unidad): añadir el preset "cómic" con un
  * campo nuevo (strokeWidth) produce su formulario SIN tocar este archivo
  * (recorrido de extensibilidad del enunciado, §7).
+ *
+ * Layout de campo (design v3): etiqueta con truncate a la izquierda + input
+ * numérico compacto con sufijo de unidad a la derecha (fuente única del
+ * valor, cero duplicados, cero colisiones); slider a ancho completo debajo.
  */
 import * as React from "react";
-import { Cpu, Download, PackageOpen, WandSparkles } from "lucide-react";
+import { CheckCircle2, Cpu, Download, PackageOpen, WandSparkles } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,10 +28,11 @@ import { presetDefaults, presetFields, presetRegistry } from "@/lib/registries/p
 import { exporterRegistry } from "@/lib/registries/exporter-registry";
 import type { VectorParams } from "@/lib/domain/entities";
 import { useStudio } from "@/lib/state/store";
-import { OkChip, PanelStates, ProgressLine } from "@/components/studio/molecules";
+import { cn } from "@/lib/utils";
+import { ProgressLine } from "@/components/studio/molecules";
 import { ExportDialog } from "@/components/studio/ExportDialog";
 import { useSmallViewport } from "@/components/studio/hooks";
-import { DUR, EASE, riseIn, SPRING, TAP } from "@/lib/motion";
+import { DUR, EASE, riseIn, stagger, SPRING, TAP } from "@/lib/motion";
 
 const PRESETS = appConfig.vectorization.presetManifest;
 
@@ -57,31 +62,29 @@ export function InspectorPanel() {
 
   const vectorReady = source !== null && !vectorizeBusy && !small;
 
-  // FIX-2: shrink-0 — columna derecha scrollea; la card conserva altura
-  // natural (con min-h-0 se encogía y el contenido desbordaba/superponía).
   return (
-    <Card className="vt-panel flex shrink-0 flex-col border-border/80">
-      <CardHeader className="pb-2">
+    <Card className="vt-panel flex shrink-0 flex-col">
+      <CardHeader className="px-4 pb-3 pt-4">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-          <Cpu className="h-4 w-4" aria-hidden /> Inspector
+          <Cpu className="size-4 text-[var(--vt-copper)]" aria-hidden /> Inspector
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col">
+      <CardContent className="flex flex-col px-4 pb-4">
         <Tabs defaultValue="vector" className="flex flex-col">
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="vector">Vectorizar</TabsTrigger>
-            <TabsTrigger value="export">Exportar</TabsTrigger>
+            <TabsTrigger value="vector" className="text-xs">Vectorizar</TabsTrigger>
+            <TabsTrigger value="export" className="text-xs">Exportar</TabsTrigger>
           </TabsList>
 
           {/* ─────────── Tab Vectorizar ─────────── */}
           <TabsContent value="vector" className="mt-3 flex flex-col gap-3">
             {small && (
-              <p role="note" className="rounded-md border border-amber-300 bg-amber-100 px-2 py-1.5 text-[11px] text-amber-900">
+              <p role="note" className="rounded-md border border-amber-400/30 bg-amber-400/10 px-2 py-1.5 text-[11px] text-amber-200/90">
                 Vectorizar queda bloqueado en pantallas pequeñas (presupuesto móvil de configuración).
               </p>
             )}
             <div className="space-y-1.5">
-              <Label htmlFor="preset" className="text-[11px]">Preset de fidelidad</Label>
+              <Label htmlFor="preset" className="vt-label">Preset de fidelidad</Label>
               <Select value={presetId} onValueChange={selectPreset}>
                 <SelectTrigger id="preset" size="sm" className="w-full">
                   <SelectValue />
@@ -103,15 +106,20 @@ export function InspectorPanel() {
               initial="hidden"
               animate="show"
               key={presetId}
-              className="space-y-2.5 rounded-md border border-border/70 bg-secondary/30 p-2.5"
+              className="space-y-3 rounded-lg border border-border/80 bg-secondary/30 p-3"
               aria-label="Parámetros del preset (autogenerados del registro)"
             >
-              {fields.map((field) => {
+              {fields.map((field, i) => {
                 const value = (params as unknown as Record<string, unknown>)[field.key];
+                // Separador cuando cambia el TIPO de control (número→enum):
+                // evita que un select quede «pegado» al último slider
+                // (hallazgo del árbitro: jerarquía interna irregular).
+                const prev = fields[i - 1];
+                const kindShift = prev !== undefined && prev.kind !== field.kind;
                 if (field.kind === "enum") {
                   return (
-                    <div key={field.key} className="space-y-1">
-                      <Label htmlFor={`f-${field.key}`} className="text-[11px]">{field.label}</Label>
+                    <div key={field.key} className={cn("space-y-1", kindShift && "mt-1 border-t border-border/60 pt-2.5")}>
+                      <Label htmlFor={`f-${field.key}`} className="vt-label">{field.label}</Label>
                       <Select value={String(value)} onValueChange={(v) => setParams({ ...params, [field.key]: v })}>
                         <SelectTrigger id={`f-${field.key}`} size="sm" className="w-full">
                           <SelectValue />
@@ -127,46 +135,55 @@ export function InspectorPanel() {
                 }
                 const num = Number(value);
                 return (
-                  <div key={field.key} className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor={`f-${field.key}`} className="text-[11px]">{field.label}</Label>
-                      <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                        {num} {field.unit ?? ""}
+                  <div key={field.key} className={cn("space-y-1.5", kindShift && "mt-1 border-t border-border/60 pt-2.5")}>
+                    {/* Fila etiqueta + valor: la etiqueta trunca, el grupo de
+                        valor es shrink-0 — matemáticamente imposible que
+                        colisionen. La unidad vive FUERA del input (los sufijos
+                        internos se solapaban con números de 2+ dígitos). */}
+                    <div className="flex min-w-0 items-center justify-between gap-2">
+                      <Label htmlFor={`f-${field.key}`} className="min-w-0 truncate text-[11px] text-foreground/75">
+                        {field.label}
+                      </Label>
+                      <span className="flex shrink-0 items-center gap-1">
+                        <Input
+                          id={`f-${field.key}`}
+                          aria-label={`${field.label} (valor exacto)`}
+                          type="number"
+                          value={num}
+                          min={field.min}
+                          max={field.max}
+                          step={field.step}
+                          onChange={(e) => {
+                            const n = Number(e.target.value);
+                            if (Number.isFinite(n) && n >= (field.min ?? 0) && n <= (field.max ?? 0)) {
+                              setParams({ ...params, [field.key]: n });
+                            }
+                          }}
+                          className="h-7 w-[58px] px-1.5 text-right font-mono text-[11px] tabular-nums"
+                        />
+                        {field.unit !== undefined && field.unit !== "" && (
+                          <span title={field.unit} className="w-10 truncate text-right font-mono text-[9px] leading-none text-muted-foreground">
+                            {field.unit}
+                          </span>
+                        )}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Slider
-                        id={`f-${field.key}`}
-                        value={[num]}
-                        min={field.min}
-                        max={field.max}
-                        step={field.step}
-                        onValueChange={(v) => setParams({ ...params, [field.key]: v[0] ?? num })}
-                        className="flex-1"
-                      />
-                      <Input
-                        aria-label={`${field.label} exacto`}
-                        type="number"
-                        value={num}
-                        min={field.min}
-                        max={field.max}
-                        step={field.step}
-                        onChange={(e) => {
-                          const n = Number(e.target.value);
-                          if (Number.isFinite(n) && n >= (field.min ?? 0) && n <= (field.max ?? 0)) {
-                            setParams({ ...params, [field.key]: n });
-                          }
-                        }}
-                        className="h-7 w-16 font-mono text-[11px]"
-                      />
-                    </div>
+                    <Slider
+                      aria-label={`${field.label} (deslizador)`}
+                      value={[num]}
+                      min={field.min}
+                      max={field.max}
+                      step={field.step}
+                      onValueChange={(v) => setParams({ ...params, [field.key]: v[0] ?? num })}
+                      className="flex-1"
+                    />
                   </div>
                 );
               })}
             </motion.div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="engine" className="text-[11px]">Motor</Label>
+              <Label htmlFor="engine" className="vt-label">Motor</Label>
               <Select value={engineId} onValueChange={setEngineId}>
                 <SelectTrigger id="engine" size="sm" className="w-full">
                   <SelectValue />
@@ -182,28 +199,38 @@ export function InspectorPanel() {
             </div>
 
             <motion.div whileTap={reduced ? undefined : TAP}>
-              <Button className="w-full" disabled={!vectorReady} onClick={() => void runVectorization(presetId, params, engineId)}>
-                <WandSparkles className="mr-1 h-4 w-4" aria-hidden /> Vectorizar en el navegador
+              <Button className="vt-btn-copper h-9 w-full gap-1.5 text-[13px] font-semibold" disabled={!vectorReady} onClick={() => void runVectorization(presetId, params, engineId)}>
+                <WandSparkles className="size-4" aria-hidden /> Vectorizar en el navegador
               </Button>
             </motion.div>
             <ProgressLine percent={vectorizePercent} phase={vectorizePhase} />
             {vectorization !== null && !vectorizeBusy && (
-              <div className="flex flex-wrap gap-1.5">
-                <OkChip>{vectorization.nodeCount.toLocaleString("es")} nodos</OkChip>
-                <OkChip>preset {vectorization.presetId}</OkChip>
-                <OkChip>{vectorization.engineId}</OkChip>
-              </div>
+              <motion.div
+                initial="hidden"
+                animate="show"
+                variants={stagger(0.06)}
+                className="rounded-lg border border-emerald-400/25 bg-emerald-400/[0.07] p-2.5"
+                aria-live="polite"
+              >
+                <motion.p variants={riseIn} className="flex items-center gap-1.5 text-xs font-medium text-emerald-300">
+                  <CheckCircle2 className="size-3.5" aria-hidden /> Vectorización lista
+                </motion.p>
+                <motion.div variants={riseIn} className="mt-1.5 flex flex-wrap gap-1.5 font-mono text-[10px]">
+                  <span className="rounded border border-border bg-secondary/70 px-1.5 py-0.5 tabular-nums">{vectorization.nodeCount.toLocaleString("es")} nodos</span>
+                  <span className="rounded border border-border bg-secondary/70 px-1.5 py-0.5">preset {vectorization.presetId}</span>
+                  <span className="rounded border border-border bg-secondary/70 px-1.5 py-0.5">{vectorization.engineId}</span>
+                </motion.div>
+              </motion.div>
             )}
-            <PanelStates
-              status={sourceStatus === "ready" && vectorization === null ? "empty" : "ready"}
-              empty={<p className="text-center text-[11px] text-muted-foreground">Aún no hay vectorización en este proyecto.</p>}
-            >
-              <span className="sr-only">Estado listo</span>
-            </PanelStates>
+            {sourceStatus === "ready" && vectorization === null && !vectorizeBusy && source !== null && (
+              <p className="text-center text-[10px] text-muted-foreground">
+                Ajusta el preset y pulsa <span className="font-medium text-foreground/70">Vectorizar</span> para separar las tintas.
+              </p>
+            )}
           </TabsContent>
 
           {/* ─────────── Tab Exportar ─────────── */}
-          <TabsContent value="export" className="mt-3 flex flex-col gap-2">
+          <TabsContent value="export" className="mt-3 flex flex-col gap-2.5">
             <div className="space-y-1.5">
               {appConfig.export.formats.map((fmt) => {
                 const entry = exporterRegistry.get(fmt.id);
@@ -217,35 +244,39 @@ export function InspectorPanel() {
                     whileHover={reduced ? undefined : { y: -1.5 }}
                     whileTap={reduced ? undefined : TAP}
                     transition={{ duration: DUR.fast, ease: EASE.signature }}
-                    className={`w-full rounded-md border p-2 text-left transition-colors ${active ? "border-accent bg-accent/5" : "border-border/70 hover:border-foreground/25"}`}
+                    className={`w-full rounded-lg border p-2.5 text-left transition-colors ${
+                      active
+                        ? "border-[var(--vt-copper)]/45 bg-[var(--vt-copper-soft)]"
+                        : "border-border/80 hover:border-foreground/25 hover:bg-secondary/40"
+                    }`}
                   >
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
-                      <PackageOpen className="h-3.5 w-3.5" aria-hidden /> {fmt.label}
+                      <PackageOpen className={`size-3.5 ${active ? "text-[var(--vt-copper)]" : "text-muted-foreground"}`} aria-hidden /> {fmt.label}
                       {active && (
                         <motion.span
                           initial={reduced ? false : { opacity: 0, scale: 0.7 }}
                           animate={{ opacity: 1, scale: 1 }}
                           transition={SPRING.pop}
-                          className="ml-auto font-mono text-[10px] text-accent"
+                          className="ml-auto inline-flex items-center gap-1 font-mono text-[10px] font-normal text-[var(--vt-copper)]"
                         >
-                          elegido
+                          <CheckCircle2 className="size-3" aria-hidden /> elegido
                         </motion.span>
                       )}
                     </span>
-                    <span className="block text-[10px] text-muted-foreground">{entry?.description ?? fmt.description}</span>
+                    <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">{entry?.description ?? fmt.description}</span>
                   </motion.button>
                 );
               })}
             </div>
             <motion.div whileTap={reduced ? undefined : TAP}>
-              <Button className="w-full" disabled={vectorization === null || small} onClick={() => setExportOpen(true)}>
-                <Download className="mr-1 h-4 w-4" aria-hidden /> Preparar exportación
+              <Button className="vt-btn-copper h-9 w-full gap-1.5 text-[13px] font-semibold" disabled={vectorization === null || small} onClick={() => setExportOpen(true)}>
+                <Download className="size-4" aria-hidden /> Preparar exportación
               </Button>
             </motion.div>
             <p className="text-[10px] leading-snug text-muted-foreground">
               Cuota de configuración: {appConfig.limits.exports.maxPerDay} exportaciones/día. El ZIP lleva un SVG por tinta + {appConfig.export.manifestFileName} con orden de impresión, marcas y coberturas.
             </p>
-            <p className="mt-auto font-mono text-[9px] text-muted-foreground/70" title="Digest de configuración (drift entre entornos)">
+            <p className="mt-1 font-mono text-[9px] text-muted-foreground/60" title="Digest de configuración (drift entre entornos)">
               config {configDigest}
             </p>
           </TabsContent>

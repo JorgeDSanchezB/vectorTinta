@@ -75,7 +75,7 @@ export function ExportDialog({
           )}
           {exportStatus === "done" && (
             <div className="space-y-2">
-              <p className="flex items-center gap-2 text-sm text-emerald-800">
+              <p className="flex items-center gap-2 text-sm text-emerald-300">
                 <CheckCircle2 className="h-4 w-4" aria-hidden /> Listo: descargado y registrado con manifiesto.
               </p>
               <div className="flex flex-wrap gap-2">

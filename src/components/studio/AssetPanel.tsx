@@ -66,26 +66,21 @@ export function AssetPanel() {
     ctx.putImageData(img, 0, 0);
   }, [source]);
 
-  const accept = appConfig.limits.image.allowedMimeTypes.map((m) => `.${m.split("/")[1]}`).join(",");
-
   const takeFile = (file: File | undefined): void => {
     if (file === undefined) return;
     void uploadSource(file, file.name, file.type);
   };
 
-  // FIX-2: shrink-0 — la columna lateral scrollea; la card conserva su altura
-  // natural. Con min-h-0 se encogía y su contenido (metadatos) desbordaba
-  // visualmente sobre la card "Quitar fondo".
   return (
-    <Card className="vt-panel flex shrink-0 flex-col border-border/80">
-      <CardHeader className="pb-2">
+    <Card className="vt-panel flex shrink-0 flex-col">
+      <CardHeader className="px-4 pb-3 pt-4">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-          <Upload className="h-4 w-4" aria-hidden /> Imagen fuente
+          <Upload className="size-4 text-[var(--vt-copper)]" aria-hidden /> Imagen fuente
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      <CardContent className="flex flex-col gap-3 px-4 pb-4">
         {small && (
-          <p role="note" className="rounded-md border border-amber-300 bg-amber-100 px-2 py-1.5 text-[11px] text-amber-900">
+          <p role="note" className="rounded-md border border-amber-400/30 bg-amber-400/10 px-2 py-1.5 text-[11px] leading-snug text-amber-200/90">
             Pantalla pequeña: las operaciones pesadas (vectorizar, quitar fondo, exportar) quedan bloqueadas por presupuesto de rendimiento (configuración móvil).
           </p>
         )}
@@ -120,24 +115,28 @@ export function AssetPanel() {
               initial={{ opacity: 0, scale: reduced ? 1 : 0.985 }}
               animate={{ opacity: 1, scale: dragOver && !reduced ? 1.015 : 1 }}
               transition={{ duration: DUR.base, ease: EASE.signature }}
-              className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 text-center transition-all duration-300 ${
-                dragOver ? "border-accent bg-accent/10 shadow-[inset_0_0_18px_-6px_rgba(191,25,50,0.25)]" : "border-border hover:border-foreground/40 hover:bg-accent/5"
+              className={`group flex cursor-pointer flex-col items-center justify-center gap-2.5 rounded-xl border-2 border-dashed p-6 text-center transition-colors duration-300 ${
+                dragOver
+                  ? "border-[var(--vt-copper)]/70 bg-[var(--vt-copper-soft)]"
+                  : "border-border hover:border-foreground/30 hover:bg-secondary/40"
               }`}
             >
               <motion.span
-                className="inline-flex text-muted-foreground"
-                animate={reduced ? undefined : dragOver ? { y: 0, scale: 1.15 } : { y: [0, -4, 0], scale: 1 }}
+                className={`inline-flex size-11 items-center justify-center rounded-full border transition-colors ${
+                  dragOver ? "border-[var(--vt-copper)]/60 text-[var(--vt-copper)]" : "border-border text-muted-foreground group-hover:text-foreground/80"
+                }`}
+                animate={reduced ? undefined : dragOver ? { y: 0, scale: 1.08 } : { y: [0, -4, 0], scale: 1 }}
                 transition={reduced ? undefined : { duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
               >
-                <Upload className="h-7 w-7" aria-hidden />
+                <Upload className="size-5" aria-hidden />
               </motion.span>
               <p className="text-sm font-medium">Arrastra tu arte aquí o haz clic</p>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
                 {appConfig.limits.image.allowedMimeTypes.join(" · ")} · máx {Math.round(appConfig.limits.image.maxUploadBytes / 1048576)} MiB ·{" "}
                 {appConfig.limits.image.maxDimension}px por lado
               </p>
-              <p className="text-[10px] text-muted-foreground">
-                Si tu imagen supera los límites, se adapta automáticamente en tu navegador (escala + recodificación) antes de subir.
+              <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+                Si supera los límites, se adapta sola en tu navegador antes de subir.
               </p>
               <input
                 ref={inputRef}
@@ -151,22 +150,51 @@ export function AssetPanel() {
               />
             </motion.div>
           ) : source !== null ? (
-            <div className="space-y-3">
-              <div className="vt-checker overflow-hidden rounded-md border border-border">
-                <canvas ref={canvasRef} className="block h-auto w-full" aria-label="Vista de la imagen fuente" style={{ maxHeight: 260 }} />
+            <div className="space-y-2.5">
+              <div className="vt-checker overflow-hidden rounded-lg border border-border">
+                <canvas ref={canvasRef} className="block h-auto w-full" aria-label="Vista de la imagen fuente" style={{ maxHeight: 210 }} />
               </div>
-              {/* FIX-2b: una columna (label izq · valor der). Con grid-cols-2 el
-                  valor "1636×2752" desbordaba su celda e invadía la columna
-                  vecina ("Peso") — colisión de texto real medida en E2E. */}
-              <dl className="grid grid-cols-1 gap-y-1 font-mono text-[11px] text-muted-foreground">
-                <div className="flex justify-between gap-2"><dt>Dimensiones</dt><dd className="tabular-nums">{source.width}×{source.height}</dd></div>
-                <div className="flex justify-between gap-2"><dt>Peso</dt><dd className="tabular-nums">{(source.bytes / 1024).toFixed(0)} KiB</dd></div>
-                <div className="flex justify-between gap-2"><dt>MIME</dt><dd>{source.mimeType}</dd></div>
-                <div className="flex justify-between gap-2"><dt>sha-256</dt><dd title={source.checksum} className="truncate">{source.checksum.slice(0, 10)}…</dd></div>
+              {/* Metadatos: una columna (label izq · valor der), filas mono
+                  con separador punteado — cero colisiones garantizadas. */}
+              <dl className="space-y-1 rounded-lg bg-secondary/30 px-2.5 py-2 font-mono text-[11px]">
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="shrink-0 text-muted-foreground">Dimensiones</dt>
+                  <span aria-hidden className="mx-1 min-w-3 flex-1 border-b border-dotted border-border" />
+                  <dd className="shrink-0 tabular-nums">{source.width}×{source.height}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="shrink-0 text-muted-foreground">Peso</dt>
+                  <span aria-hidden className="mx-1 min-w-3 flex-1 border-b border-dotted border-border" />
+                  <dd className="shrink-0 tabular-nums">{(source.bytes / 1024).toFixed(0)} KiB</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="shrink-0 text-muted-foreground">MIME</dt>
+                  <span aria-hidden className="mx-1 min-w-3 flex-1 border-b border-dotted border-border" />
+                  <dd className="shrink-0">{source.mimeType}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="shrink-0 text-muted-foreground">sha-256</dt>
+                  <span aria-hidden className="mx-1 min-w-3 flex-1 border-b border-dotted border-border" />
+                  <dd className="shrink-0">
+                    <button
+                      type="button"
+                      title={`Copiar sha-256 completo: ${source.checksum}`}
+                      aria-label="Copiar sha-256 completo"
+                      className="rounded px-0.5 py-0 transition-colors hover:bg-secondary hover:text-foreground"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(source.checksum).then(() => {
+                          toast.info("sha-256 copiado al portapapeles");
+                        });
+                      }}
+                    >
+                      {source.checksum.slice(0, 10)}…
+                    </button>
+                  </dd>
+                </div>
               </dl>
               <div className="flex flex-wrap items-center gap-1.5">
                 {source.bgApplied ? <OkChip>Fondo eliminado · reversible (Ctrl+Z)</OkChip> : hasAlpha ? <OkChip>Alfa nativo</OkChip> : null}
-                <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={bgBusy}>
+                <Button variant="outline" size="sm" className="h-7" onClick={() => inputRef.current?.click()} disabled={bgBusy}>
                   Reemplazar imagen
                 </Button>
                 <input
@@ -186,65 +214,62 @@ export function AssetPanel() {
 
         {/* ── Eliminación de fondo (cliente, reversible) ── */}
         {source !== null && (
-          <Card className="border-border/70 bg-secondary/40">
-            <CardHeader className="px-3 py-2">
-              <CardTitle className="flex items-center gap-1.5 text-xs font-semibold">
-                <Eraser className="h-3.5 w-3.5" aria-hidden /> Quitar fondo
-                {op?.metadata?.licencia === "pending-audit" && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-normal text-amber-700">
-                    <ShieldAlert className="h-3 w-3" aria-hidden /> licencia pendiente de auditoría
-                  </span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 px-3 pb-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="bg-op" className="text-[11px]">Motor</Label>
-                <Select value={opId} onValueChange={setOpId}>
-                  <SelectTrigger id="bg-op" size="sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {BG_OPS.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.label}
-                        {o.metadata?.licencia === "pending-audit" ? " (bloqueado: licencia)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+          <div className="space-y-2.5 rounded-lg border border-border/80 bg-secondary/30 p-2.5">
+            <div className="flex items-center gap-1.5">
+              <Eraser className="size-3.5 text-[var(--vt-copper)]" aria-hidden />
+              <h3 className="text-xs font-semibold">Quitar fondo</h3>
+              {op?.metadata?.licencia === "pending-audit" && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-normal text-amber-300/90">
+                  <ShieldAlert className="size-3" aria-hidden /> licencia pendiente
+                </span>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="bg-op" className="vt-label">Motor</Label>
+              <Select value={opId} onValueChange={setOpId}>
+                <SelectTrigger id="bg-op" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BG_OPS.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.label}
+                      {o.metadata?.licencia === "pending-audit" ? " (bloqueado: licencia)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-[10px] leading-snug text-muted-foreground">{op?.description}</p>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="bg-tol" className="text-[11px] text-muted-foreground">Tolerancia</Label>
+                <span className="font-mono text-[11px] tabular-nums text-foreground/80">{tolerance} %</span>
               </div>
-              <p className="text-[10px] leading-snug text-muted-foreground">{op?.description}</p>
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="bg-tol" className="text-[11px]">Tolerancia</Label>
-                  <span className="font-mono text-[11px] tabular-nums">{tolerance} %</span>
-                </div>
-                <Slider id="bg-tol" value={[tolerance]} min={0} max={100} step={1} onValueChange={(v) => setTolerance(v[0] ?? tolerance)} disabled={bgBusy} />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="bg-feather" className="text-[11px]">Suavizar borde (1 px)</Label>
-                <Switch id="bg-feather" checked={feather} onCheckedChange={setFeather} disabled={bgBusy} />
-              </div>
-              <Button
-                size="sm"
-                className="w-full"
-                disabled={bgBusy || small}
-                onClick={() => {
-                  void runBgRemoval(engineId, { tolerance, feather }).then(() => undefined, (e) => {
-                    toast.error("El motor de fondo devolvió un problema", { description: e instanceof Error ? e.message : undefined });
-                  });
-                }}
-              >
-                <Eraser className="mr-1 h-3.5 w-3.5" aria-hidden /> Quitar fondo en el navegador
-              </Button>
-              <ProgressLine percent={bgPercent} phase={bgPhase} />
-              <p className="flex items-start gap-1 text-[10px] text-muted-foreground">
-                <Info className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-                La máscara alfa no se persiste: es un paso local y reversible antes de vectorizar (ADR-009).
-              </p>
-            </CardContent>
-          </Card>
+              <Slider id="bg-tol" value={[tolerance]} min={0} max={100} step={1} onValueChange={(v) => setTolerance(v[0] ?? tolerance)} disabled={bgBusy} />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="bg-feather" className="text-[11px] text-muted-foreground">Suavizar borde (1 px)</Label>
+              <Switch id="bg-feather" checked={feather} onCheckedChange={setFeather} disabled={bgBusy} />
+            </div>
+            <Button
+              size="sm"
+              className="h-8 w-full text-xs font-semibold"
+              disabled={bgBusy || small}
+              onClick={() => {
+                void runBgRemoval(engineId, { tolerance, feather }).then(() => undefined, (e) => {
+                  toast.error("El motor de fondo devolvió un problema", { description: e instanceof Error ? e.message : undefined });
+                });
+              }}
+            >
+              <Eraser className="mr-1 size-3.5" aria-hidden /> Quitar fondo en el navegador
+            </Button>
+            <ProgressLine percent={bgPercent} phase={bgPhase} />
+            <p className="flex items-start gap-1 text-[10px] leading-snug text-muted-foreground">
+              <Info className="mt-0.5 size-3 shrink-0" aria-hidden />
+              La máscara alfa no se persiste: es un paso local y reversible antes de vectorizar (ADR-009).
+            </p>
+          </div>
         )}
       </CardContent>
     </Card>

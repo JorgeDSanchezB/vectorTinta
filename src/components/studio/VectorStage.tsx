@@ -3,6 +3,12 @@
 /**
  * VectorTinta — Lienzo SVG nativo (ADR-002, plan §5.2/§5.3).
  *
+ * Design v3 «Mesa de Tinta»: el lienzo es una mesa oscura con grano (vt-desk)
+ * y un foco cálido que sigue al puntero (div compositor-only, apagado con
+ * reduced motion). La obra vive en una HOJA DE PAPEL clara (vt-sheet) con
+ * sombra real — el patrón de transparencia (vt-checker) queda dentro de la
+ * hoja, como corresponde.
+ *
  * Mecánica de rendimiento (presupuesto <100 ms declarado §5.3):
  *  - Los fragmentos de capa se inlinean UNA vez por cambio estructural
  *    (`layersVersion`); recolor/visibilidad/orden NO re-renderizan React:
@@ -11,11 +17,10 @@
  *  - Zoom/pan: transform CSS del contenedor; no toca el árbol SVG.
  *  - Aislar: display del resto (O(n capas), n ≤ 30).
  *  - colorHex inválido en datos leídos → magenta de rescate de configuración
- *    (rendering.fallbackColorHex) que DENUNCIA el problema (§5.2), nunca un
- *    color parecido en silencio.
+ *    (rendering.fallbackColorHex) que DENUNCIA el problema (§5.2).
  */
 import * as React from "react";
-import { Crosshair, Maximize2, Minus, Plus } from "lucide-react";
+import { Crosshair, Droplets, Image as ImageIcon, Maximize2, Minus, Plus, Upload, WandSparkles } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { appConfig } from "@/lib/config/app.config";
@@ -23,9 +28,7 @@ import { isValidColorHex } from "@/lib/domain/invariants";
 import { fragmentInner } from "@/lib/state/slices/project";
 import { useStudio } from "@/lib/state/store";
 import { cn } from "@/lib/utils";
-import { EmptyState } from "@/components/studio/molecules";
-import { SPRING, REVEAL, PULSE_MS } from "@/lib/motion";
-import { Image as ImageIcon } from "lucide-react";
+import { SPRING, REVEAL, PULSE_MS, floatLoop } from "@/lib/motion";
 
 /**
  * Grupo de capa MEMOIZADO (§5.3): el fragmento se inlinea UNA vez por cambio
@@ -51,11 +54,29 @@ interface LayerDomState {
   orden: number;
 }
 
+/** Paso del onboarding del estado vacío. */
+function OnboardStep({ n, icon: Icon, title, hint }: { n: string; icon: React.ComponentType<{ className?: string }>; title: string; hint: string }) {
+  return (
+    <div className="flex items-start gap-2.5 text-left">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-secondary/70 font-mono text-[10px] font-semibold text-[var(--vt-copper)]">
+        {n}
+      </span>
+      <span className="min-w-0">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-foreground/90">
+          <Icon className="size-3 text-muted-foreground" aria-hidden /> {title}
+        </span>
+        <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">{hint}</span>
+      </span>
+    </div>
+  );
+}
+
 export function VectorStage() {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const svgRef = React.useRef<SVGSVGElement>(null);
   const groupRefs = React.useRef(new Map<string, SVGGElement>());
   const appliedRef = React.useRef<Map<string, LayerDomState>>(new Map());
+  const spotRef = React.useRef<HTMLDivElement>(null);
 
   const layers = useStudio((s) => s.layers);
   const layersVersion = useStudio((s) => s.layersVersion);
@@ -211,16 +232,22 @@ export function VectorStage() {
     return () => container.removeEventListener("wheel", onWheel);
   }, [setPan, setZoom]);
 
-  /* ── Pan + selección por puntero ── */
+  /* ── Pan + selección por puntero + foco de la mesa ──
+     El foco (spotlight) se mueve por mutación directa de style.transform:
+     cero re-render de React, compositor-only. */
   const dragRef = React.useRef<{ x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null);
   const [grabbing, setGrabbing] = React.useState(false);
 
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
-    dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y, moved: false };
-    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-  };
+  const moveSpotlight = React.useCallback((clientX: number, clientY: number): void => {
+    const el = spotRef.current;
+    const container = containerRef.current;
+    if (el === null || container === null) return;
+    const rect = container.getBoundingClientRect();
+    el.style.transform = `translate3d(${clientX - rect.left - 450}px, ${clientY - rect.top - 450}px, 0)`;
+  }, []);
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!reducedMotionRef.current) moveSpotlight(e.clientX, e.clientY);
     const d = dragRef.current;
     if (d === null) return;
     const dx = e.clientX - d.x;
@@ -230,6 +257,11 @@ export function VectorStage() {
       setGrabbing(true);
     }
     if (d.moved) setPan({ x: d.panX + dx, y: d.panY + dy });
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+    dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y, moved: false };
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
@@ -272,7 +304,7 @@ export function VectorStage() {
     <div
       ref={containerRef}
       className={cn(
-        "vt-checker relative min-h-0 flex-1 touch-none overflow-hidden rounded-lg border border-border",
+        "vt-desk relative min-h-0 flex-1 touch-none overflow-hidden rounded-xl border border-border/70",
         grabbing ? "vt-canvas-grabbing" : "vt-canvas-grab",
       )}
       onPointerDown={onPointerDown}
@@ -281,15 +313,43 @@ export function VectorStage() {
       role="application"
       aria-label="Lienzo de vectorización: arrastra para desplazar, rueda para zoom, clic en una zona para seleccionar su capa"
     >
+      {/* Foco cálido de la mesa (compositor-only; invisible con reduced motion) */}
+      {!reduced && (
+        <div
+          ref={spotRef}
+          aria-hidden
+          className="pointer-events-none absolute left-0 top-0 size-[900px] rounded-full"
+          style={{ background: "radial-gradient(circle, rgba(224,100,124,0.06) 0%, rgba(233,184,36,0.03) 38%, transparent 62%)" }}
+        />
+      )}
+      {/* Viñeta de la mesa: profundidad sin gradiente en el contenido */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 shadow-[inset_0_0_90px_rgba(0,0,0,0.45)]" />
+
       {source === null && !hasVectorization ? (
-        <div className="flex h-full items-center justify-center">
-          <EmptyState icon={ImageIcon} title="Carga la imagen fuente en el panel izquierdo" hint="JPG, PNG o WebP; los límites están en el panel." />
+        <div className="relative flex h-full items-center justify-center p-6">
+          <div className="flex max-w-xs flex-col items-center gap-5 text-center">
+            <motion.span
+              className="flex size-16 items-center justify-center rounded-full border border-dashed border-foreground/20 text-muted-foreground"
+              animate={reduced ? undefined : { y: [0, -6, 0] }}
+              transition={reduced ? undefined : floatLoop}
+            >
+              <ImageIcon className="size-6" aria-hidden />
+            </motion.span>
+            <div className="space-y-3">
+              <p className="text-sm font-medium">Tu mesa está lista</p>
+              <OnboardStep n="1" icon={Upload} title="Sube tu arte" hint="En el panel «Imagen fuente», arriba a la izquierda." />
+              <OnboardStep n="2" icon={WandSparkles} title="Vectoriza" hint="Elige un preset en el Inspector y separa las tintas." />
+              <OnboardStep n="3" icon={Droplets} title="Prepara el fotolito" hint="Recolorea, ordena y exporta el ZIP de serigrafía." />
+            </div>
+          </div>
         </div>
       ) : (
         <div
-          className="absolute left-0 top-0 origin-top-left shadow-[0_2px_20px_rgba(27,27,27,0.18)]"
+          className="vt-sheet absolute left-0 top-0 origin-top-left rounded-[2px]"
           style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
         >
+          {/* Patrón de transparencia DENTRO de la hoja */}
+          <div aria-hidden className="vt-checker absolute inset-0" />
           {hasVectorization ? (
             <svg
               ref={svgRef}
@@ -297,7 +357,7 @@ export function VectorStage() {
               height={height}
               viewBox={`0 0 ${width} ${height}`}
               xmlns="http://www.w3.org/2000/svg"
-              style={{ display: "block", background: "transparent" }}
+              style={{ display: "block", background: "transparent", position: "relative" }}
             >
               {[...layers]
                 .sort((a, b) => a.orden - b.orden)
@@ -311,32 +371,33 @@ export function VectorStage() {
                 ))}
             </svg>
           ) : (
-            <canvas ref={rasterCanvasRef} width={width} height={height} style={{ display: "block" }} aria-label="Vista previa de la imagen fuente" />
+            <canvas ref={rasterCanvasRef} width={width} height={height} style={{ display: "block", position: "relative" }} aria-label="Vista previa de la imagen fuente" />
           )}
         </div>
       )}
 
-      {/* Barra de herramientas del lienzo (entra con spring, glass) */}
+      {/* Barra de herramientas del lienzo (entra con spring, glass oscuro) */}
       <motion.div
         initial={reduced ? false : { opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={SPRING.tool}
-        className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-card/95 px-2 py-1 shadow-md backdrop-blur"
+        className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-border bg-card/90 px-1.5 py-1 shadow-lg backdrop-blur"
       >
-        <Button size="icon" className="vt-hit size-7" variant="ghost" aria-label="Alejar" onClick={() => setZoom(zoom / 1.25)}>
-          <Minus className="h-4 w-4" aria-hidden />
+        <Button size="icon" className="vt-hit size-7 rounded-full" variant="ghost" aria-label="Alejar" onClick={() => setZoom(zoom / 1.25)}>
+          <Minus className="size-4" aria-hidden />
         </Button>
-        {/* Readout sin remontaje (ARB1-9): sin key ni animación por tick de rueda. */}
+        {/* Readout sin remontaje (ARB1-9): sin key ni animación por tick de ruedas. */}
         <span className="w-14 text-center font-mono text-[11px] tabular-nums text-muted-foreground">{Math.round(zoom * 100)} %</span>
-        <Button size="icon" className="vt-hit size-7" variant="ghost" aria-label="Acercar" onClick={() => setZoom(zoom * 1.25)}>
-          <Plus className="h-4 w-4" aria-hidden />
+        <Button size="icon" className="vt-hit size-7 rounded-full" variant="ghost" aria-label="Acercar" onClick={() => setZoom(zoom * 1.25)}>
+          <Plus className="size-4" aria-hidden />
         </Button>
-        <Button size="icon" className="vt-hit size-7" variant="ghost" aria-label="Ajustar a la ventana" onClick={fit}>
-          <Maximize2 className="h-4 w-4" aria-hidden />
+        <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
+        <Button size="icon" className="vt-hit size-7 rounded-full" variant="ghost" aria-label="Ajustar a la ventana" onClick={fit}>
+          <Maximize2 className="size-4" aria-hidden />
         </Button>
         {isolatedLayerId !== null && (
-          <Button size="icon" className="vt-hit size-7 text-accent" variant="ghost" aria-label="Salir del aislamiento" onClick={() => isolateLayer(null)}>
-            <Crosshair className="h-4 w-4" aria-hidden />
+          <Button size="icon" className="vt-hit size-7 rounded-full text-[var(--vt-copper)]" variant="ghost" aria-label="Salir del aislamiento" onClick={() => isolateLayer(null)}>
+            <Crosshair className="size-4" aria-hidden />
           </Button>
         )}
       </motion.div>

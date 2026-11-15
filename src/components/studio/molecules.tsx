@@ -39,7 +39,7 @@ export function ColorSwatch({
       title={title ?? hex}
       whileHover={{ scale: 1.18 }}
       transition={SPRING.pop}
-      className={cn("inline-block rounded-[4px] border border-black/25 shadow-sm", className)}
+      className={cn("inline-block rounded-[5px] border border-black/30 shadow-[0_1px_3px_rgba(0,0,0,0.45)]", className)}
       style={{ width: size, height: size, backgroundColor: hex }}
     />
   );
@@ -48,20 +48,20 @@ export function ColorSwatch({
 /* ───────────────────────── StateChip ───────────────────────── */
 
 const CLASE_CHIP: Record<string, { label: string; className: string }> = {
-  validacion: { label: "Validación", className: "bg-amber-100 text-amber-900 border-amber-300" },
-  "params-invalidos": { label: "Params", className: "bg-amber-100 text-amber-900 border-amber-300" },
-  "no-autenticado": { label: "Sesión", className: "bg-stone-200 text-stone-800 border-stone-400" },
-  "no-encontrado": { label: "404", className: "bg-stone-200 text-stone-800 border-stone-400" },
-  temporal: { label: "Temporal", className: "bg-orange-100 text-orange-900 border-orange-300" },
-  configuracion: { label: "Config", className: "bg-orange-100 text-orange-900 border-orange-300" },
-  interno: { label: "Crítico", className: "bg-red-100 text-red-900 border-red-300" },
-  red: { label: "Red", className: "bg-stone-200 text-stone-800 border-stone-400" },
+  validacion: { label: "Validación", className: "bg-amber-400/10 text-amber-200 border-amber-400/30" },
+  "params-invalidos": { label: "Params", className: "bg-amber-400/10 text-amber-200 border-amber-400/30" },
+  "no-autenticado": { label: "Sesión", className: "bg-foreground/[0.07] text-foreground/70 border-border" },
+  "no-encontrado": { label: "404", className: "bg-foreground/[0.07] text-foreground/70 border-border" },
+  temporal: { label: "Temporal", className: "bg-orange-400/10 text-orange-200 border-orange-400/30" },
+  configuracion: { label: "Config", className: "bg-orange-400/10 text-orange-200 border-orange-400/30" },
+  interno: { label: "Crítico", className: "bg-red-400/10 text-red-200 border-red-400/30" },
+  red: { label: "Red", className: "bg-foreground/[0.07] text-foreground/70 border-border" },
   local: { label: "Local", className: "bg-secondary text-secondary-foreground border-border" },
-  listado: { label: "Listado", className: "bg-stone-200 text-stone-800 border-stone-400" },
+  listado: { label: "Listado", className: "bg-foreground/[0.07] text-foreground/70 border-border" },
 };
 
 export function StateChip({ clase, className }: { clase: string; className?: string }) {
-  const conf = CLASE_CHIP[clase] ?? { label: clase, className: "bg-stone-200 text-stone-800 border-stone-400" };
+  const conf = CLASE_CHIP[clase] ?? { label: clase, className: "bg-foreground/[0.07] text-foreground/70 border-border" };
   return (
     <Badge variant="outline" className={cn("shrink-0", conf.className, className)}>
       {conf.label}
@@ -116,11 +116,11 @@ export function PanelStates({
         animate={reduced ? { opacity: 1 } : { opacity: 1, x: [0, -7, 6, -3, 0] }}
         transition={{ duration: DUR.slow, ease: EASE.inOut }}
       >
-        <AlertTriangle className="h-8 w-8 text-destructive" aria-hidden />
+        <AlertTriangle className="size-8 text-destructive" aria-hidden />
         <p className="text-sm font-medium">{error ?? "Algo falló al cargar este panel."}</p>
         {onRetry !== undefined && (
           <Button size="sm" variant="outline" onClick={onRetry}>
-            <Loader2 className="mr-1 h-3.5 w-3.5" aria-hidden /> Reintentar
+            <Loader2 className="mr-1 size-3.5" aria-hidden /> Reintentar
           </Button>
         )}
       </motion.div>
@@ -129,20 +129,20 @@ export function PanelStates({
   if (status === "empty") {
     return (
       <motion.div
-        className="vt-halftone flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border/80 p-6 text-center"
+        className="flex flex-1 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/90 p-6 text-center"
         initial={{ opacity: 0, y: reduced ? 0 : 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: DUR.base, ease: EASE.signature }}
       >
         <motion.span
-          className="inline-flex text-muted-foreground"
+          className="inline-flex text-muted-foreground/70"
           animate={reduced ? undefined : { y: [0, -5, 0] }}
           transition={reduced ? undefined : floatLoop}
         >
-          <FileQuestion className="h-8 w-8" aria-hidden />
+          <FileQuestion className="size-7" aria-hidden />
         </motion.span>
         {empty}
-        {emptyHint !== undefined && <p className="max-w-[42ch] text-xs text-muted-foreground">{emptyHint}</p>}
+        {emptyHint !== undefined && <p className="max-w-[42ch] text-xs leading-snug text-muted-foreground">{emptyHint}</p>}
       </motion.div>
     );
   }
@@ -150,8 +150,8 @@ export function PanelStates({
     <div className={cn("flex min-h-0 flex-1 flex-col", status === "partial" && "pt-1")}>
       {status === "partial" && (
         <div className="mb-1 flex items-center justify-center">
-          <Badge variant="outline" className="border-amber-300 bg-amber-100 text-amber-900">
-            <AlertTriangle className="mr-1 h-3 w-3" aria-hidden /> Datos parcialmente degradados
+          <Badge variant="outline" className="border-amber-400/30 bg-amber-400/10 text-amber-200">
+            <AlertTriangle className="mr-1 size-3" aria-hidden /> Datos parcialmente degradados
           </Badge>
         </div>
       )}
@@ -194,7 +194,7 @@ export function ProgressLine({ percent, phase, className }: { percent: number; p
 export function QuotaMeter({ used, max, label }: { used: number; max: number; label?: string }) {
   const ratio = Math.min(1, Math.max(0, used / Math.max(1, max)));
   const pct = Math.round(ratio * 100);
-  const tone = pct >= 100 ? "bg-destructive" : pct >= 80 ? "bg-amber-500" : "bg-primary";
+  const tone = pct >= 100 ? "bg-destructive" : pct >= 80 ? "bg-amber-400" : "bg-[var(--vt-copper)]";
   return (
     <div className="flex items-center gap-2 text-[11px] text-muted-foreground" title={`${used} de ${max}`}>
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
@@ -229,14 +229,14 @@ export function EmptyState({
   return (
     <div className="flex flex-col items-center gap-2 text-center">
       <motion.span
-        className="inline-flex text-muted-foreground"
+        className="inline-flex text-muted-foreground/70"
         animate={reduced ? undefined : { y: [0, -6, 0] }}
         transition={reduced ? undefined : floatLoop}
       >
-        <Icon className="h-7 w-7" aria-hidden />
+        <Icon className="size-7" aria-hidden />
       </motion.span>
       <p className="text-sm font-medium">{title}</p>
-      {hint !== undefined && <p className="max-w-[40ch] text-xs text-muted-foreground">{hint}</p>}
+      {hint !== undefined && <p className="max-w-[40ch] text-xs leading-snug text-muted-foreground">{hint}</p>}
       {action}
     </div>
   );
@@ -249,9 +249,9 @@ export function OkChip({ children }: { children: React.ReactNode }) {
     <motion.span
       initial={popStart}
       animate={popEnd}
-      className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-900"
+      className="inline-flex items-center gap-1 rounded-md border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-xs font-medium text-emerald-300"
     >
-      <CheckCircle2 className="h-3 w-3" aria-hidden /> {children}
+      <CheckCircle2 className="size-3" aria-hidden /> {children}
     </motion.span>
   );
 }
